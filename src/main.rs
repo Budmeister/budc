@@ -19,6 +19,8 @@ use std::io::Read;
 pub mod parse;
 use crate::parse::*;
 
+use colored::Colorize;
+
 
 
 fn main() {
@@ -51,12 +53,12 @@ fn main() {
         vec![
             Der{ from: Start,    to: vec![NonTm(Stm), Tm(EOF)] },
             Der{ from: Stm,      to: vec![NonTm(Stm), Tm(Semicolon), NonTm(Stm)] },
-            Der{ from: Stm,      to: vec![Tm(Id), Tm(Assign), NonTm(Exp)] },
+            Der{ from: Stm,      to: vec![Tm(IdGen), Tm(Assign), NonTm(Exp)] },
             Der{ from: Stm,      to: vec![Tm(Print), NonTm(ExpList), Tm(RightParen)] },
-            Der{ from: Exp,      to: vec![Tm(Id)] },
-            Der{ from: Exp,      to: vec![Tm(Num)] },
-            Der{ from: Exp,      to: vec![NonTm(Exp), Tm(Operator), NonTm(Exp)] },
-            Der{ from: Exp,      to: vec![Tm(LeftParen), NonTm(Stm), Tm(Comma), NonTm(Exp), Tm(RightParen)]},
+            Der{ from: Exp,      to: vec![Tm(IdGen)] },
+            Der{ from: Exp,      to: vec![Tm(NumGen)] },
+            Der{ from: Exp,      to: vec![NonTm(Exp), Tm(OperatorGen), NonTm(Exp)] },
+            Der{ from: Exp,      to: vec![Tm(LeftParen), NonTm(Stm), Tm(Comma), NonTm(Exp), Tm(RightParen)] },
             Der{ from: ExpList,  to: vec![NonTm(Exp), Tm(Comma), NonTm(ExpList)] },
             Der{ from: ExpList,  to: vec![NonTm(Exp)] },
         ],
@@ -66,23 +68,24 @@ fn main() {
     let states;
     match lr1_generate(&mut g, Start, 
             vec![Start, Stm, Exp, ExpList],
-            vec![Id, Print, Num, Semicolon, Assign, LeftParen, RightParen, Comma, Operator, EOF]
+            vec![IdGen, Print, NumGen, Semicolon, Assign, LeftParen, RightParen, Comma, OperatorGen, EOF]
         ) {
         Ok(s)  => {
             states = s;
         },
         Err(msg) => {
-            println!("{}", msg);
+            println!("{}", msg.yellow());
             return;
         }
     };
     let mut lex = SLPTerminal::lexer(&contents);
-    match lr1_parse(&states, &mut lex, EOF) {
-        Ok(_) => {
-
+    match lr1_parse(&states, &mut lex, EOF, Error, load_slp_data) {
+        Ok(node_stack) => {
+            print_tree_visitor(&node_stack[0], 0);
+            println!("");
         }
         Err(msg) => {
-            println!("{}", msg);
+            println!("{}", msg.yellow());
             return;
         }
     }

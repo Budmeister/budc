@@ -14,8 +14,8 @@ pub enum Symbol<T, N> {
 impl<T: Display, N: Display> Display for Symbol<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Symbol::Tm(t) => write!(f, "{}", t),
-            Symbol::NonTm(n) => write!(f, "{}", n),
+            Self::Tm(t) => write!(f, "{}", t),
+            Self::NonTm(n) => write!(f, "{}", n),
         }
     }
 }
