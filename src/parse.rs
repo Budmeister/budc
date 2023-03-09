@@ -57,7 +57,6 @@ where
     N: PartialEq + Eq + Hash + Display,
 {
     let mut stack: Vec<usize> = vec![0];
-    // let mut cur_tok;
     while stack.len() != 0 {
         if let Some(tok) = lex.next() {
             loop {
