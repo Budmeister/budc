@@ -55,7 +55,10 @@ pub struct Grammar<T, N> {
 }
 impl<T, N> Grammar<T, N> {
     pub fn new(derivations: Vec<Der<T, N>>) -> Grammar<T, N> {
-        Grammar { derivations, cached_firsts: HashMap::new() }
+        Grammar {
+            derivations,
+            cached_firsts: HashMap::new(),
+        }
     }
     pub fn get_derivations_for(&self, n: &N) -> Vec<Der<T, N>>
     where
@@ -80,37 +83,40 @@ impl<T, N> Grammar<T, N> {
         // println!("Calculating first({}).", n);
         let mut new_skip;
         match skip {
-            Some(set) => { 
+            Some(set) => {
                 if set.contains(n) {
                     // println!("{} in skip", n);
                     return Vec::new();
                 }
                 new_skip = set.clone();
-            },
-            None => new_skip = {
-                // If there are no skips, use the cached value
-                if let Some(first) = self.cached_firsts.get(n) {
-                    // println!("===Using cached value===");
-                    // for x in first {
-                    //     println!("{}", x);
-                    // }
-                    // println!("---End cached value---");
-                    return first.clone();
+            }
+            None => {
+                new_skip = {
+                    // If there are no skips, use the cached value
+                    if let Some(first) = self.cached_firsts.get(n) {
+                        // println!("===Using cached value===");
+                        // for x in first {
+                        //     println!("{}", x);
+                        // }
+                        // println!("---End cached value---");
+                        return first.clone();
+                    }
+                    HashSet::new()
                 }
-                HashSet::new()
-            },
+            }
         }
         // println!("{} not in skip", n);
         new_skip.insert(n.clone());
         // for x in &new_skip {
         //     println!("{}", x);
         // }
-        let first = self.derivations
+        let first = self
+            .derivations
             .iter()
             .filter(|der| der.from == *n)
             .map(|der| der.clone())
             .collect::<Vec<Der<T, N>>>()
-        // ;let first_b = first
+            // ;let first_b = first
             .iter()
             .map(|der| match &der.to[0] {
                 Symbol::NonTm(n) => self.first(&n, Some(&new_skip)),
@@ -139,9 +145,9 @@ pub fn print_grammar<T: Display, N: Display>(g: &Grammar<T, N>) {
 }
 
 #[derive(Clone, PartialEq)]
-pub struct DottedDer<T, N> 
-where 
-    T: Eq + Hash
+pub struct DottedDer<T, N>
+where
+    T: Eq + Hash,
 {
     pub der: Der<T, N>,
     pub dot: usize,
@@ -166,7 +172,7 @@ impl<T: Eq + Hash, N> DottedDer<T, N> {
         advanced
     }
 
-    pub fn add_looks(&mut self, other_looks: &HashSet<T>) 
+    pub fn add_looks(&mut self, other_looks: &HashSet<T>)
     where
         T: Clone,
     {
@@ -184,10 +190,10 @@ impl<T: Eq + Hash, N> DottedDer<T, N> {
         }
     }
 
-    pub fn equals_ignore_look(&self, other: &Self) -> bool 
+    pub fn equals_ignore_look(&self, other: &Self) -> bool
     where
         T: PartialEq,
-        N: PartialEq
+        N: PartialEq,
     {
         self.der == other.der && self.dot == other.dot
     }
@@ -241,11 +247,14 @@ impl<T: Display + Eq + Hash, N: Display> Display for DottedDer<T, N> {
                 } else {
                     ""
                 },
-            "[".to_string() + &self.look
-                .iter()
-                .enumerate()
-                .map(|(i, t)| if i == 0 { "" } else { ", " }.to_owned() + &t.to_string() )
-                .fold(String::new(), |acc, new| acc + &new) + "]"
+            "[".to_string()
+                + &self
+                    .look
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| if i == 0 { "" } else { ", " }.to_owned() + &t.to_string())
+                    .fold(String::new(), |acc, new| acc + &new)
+                + "]"
         )
     }
 }
@@ -319,7 +328,9 @@ where
     pub next: HashMap<T, Action<N>>,
     pub goto: HashMap<N, usize>,
 }
-impl<T: Clone + Display + PartialEq + Eq + Hash, N: Clone + Display + PartialEq + Eq + Hash> State<T, N> {
+impl<T: Clone + Display + PartialEq + Eq + Hash, N: Clone + Display + PartialEq + Eq + Hash>
+    State<T, N>
+{
     // Create new state from initial derivations
     // Automatically include sub-derivations
     pub fn new(
@@ -332,9 +343,9 @@ impl<T: Clone + Display + PartialEq + Eq + Hash, N: Clone + Display + PartialEq 
         N: Display,
     {
         let mut queue: Vec<(DottedDer<T, N>, HashSet<T>)> = starting_syms
-                                                .iter()
-                                                .map(|der| (der.clone(), greater_look.clone()))
-                                                .collect();
+            .iter()
+            .map(|der| (der.clone(), greater_look.clone()))
+            .collect();
         let mut state = State {
             ders: Vec::new(),
             next: HashMap::new(),
@@ -534,7 +545,12 @@ pub fn lr1_generate<
                         shift_to = states.len();
                         states.push(new_state);
                     }
-                    println!("{}: {} -> {}", t.to_string().blue(), i.to_string().red(), shift_to.to_string().red());
+                    println!(
+                        "{}: {} -> {}",
+                        t.to_string().blue(),
+                        i.to_string().red(),
+                        shift_to.to_string().red()
+                    );
                     states[i].add_next(t, action);
                     // println!("");
                     // if states.len() >= 30 {
@@ -565,3 +581,49 @@ pub fn lr1_generate<
     print_action_table(&states, ns, ts);
     Ok(states)
 }
+
+
+#[macro_export]
+macro_rules! parse_symbol {
+    (true, false, $rhs:ident) => {
+        Node::Tm($rhs)
+    };
+    (false, true, $rhs:ident) => {
+        Node::NonTm($rhs)
+    };
+    (true, true, $rhs:ident) => {
+        compile_error!("Terminal and non-terminal token: {}", $rhs);
+    };
+    (false, false, $rhs:ident) => {
+        compile_error!("Invalid token: {}", $rhs);
+    };
+}
+
+macro_rules! grammar {
+    (
+        $term_name:ident : {
+            $( $(#[$meta:meta])* $terminal:ident $(($($term_param:ty),*))?),+ $(,)?
+        },
+        $nonterm_name:ident : {
+            $($non_terminal:ident),+ $(,)?
+        },
+        $grammarfunc_name:ident : {
+            $($lhs:ident => $($rhs:tt),+);+ $(;)?
+        }
+    ) => {
+        #[derive(logos::Logos, ::std::fmt::Debug, ::std::cmp::PartialEq, ::std::cmp::Eq, ::std::clone::Clone, ::std::hash::Hash)]
+        pub enum $term_name {
+            $( $(#[$meta])* $terminal $(($($term_param),*))?),+,
+        }
+        pub enum $nonterm_name {
+            $($non_terminal),+
+        }
+
+        pub fn $grammarfunc_name() -> grammar::Grammar<$term_name, $nonterm_name> {
+            grammar::Grammar::new(
+                    proc_macros::get_ders!{$term_name; $nonterm_name; $($terminal),+; $($non_terminal),+; $($lhs $($rhs),+);+}
+            )
+        }
+    };
+}
+pub(crate) use grammar;

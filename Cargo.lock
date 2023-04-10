@@ -90,11 +90,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "program-translation"
 version = "0.1.0"
 dependencies = [
  "colored",
  "logos",
+ "proc_macros",
 ]
 
 [[package]]

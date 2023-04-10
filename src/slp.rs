@@ -131,7 +131,3 @@ pub enum SLPNonTerminal {
     ExpList,
 }
 
-pub enum SLPNode {
-    Tm(SLPTerminal),
-    NonTm(SLPNonTerminal, Vec<SLPNode>)
-}

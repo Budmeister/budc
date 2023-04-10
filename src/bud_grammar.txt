@@ -1,0 +1,151 @@
+Grammar for the Bud programming language
+
+Non-terminals:
+* S' (Start)
+* P (Program)
+* E (Expression)                [assignment, declaration, function calls, array indexing, combinations, etc.]
+* E2 (Expression 2)             [One or more expressions in a row--for statement expressions]
+* Es (Expressions)              [One or more comma-separated expressions]
+* Ie (IdExpression)             [Expression that can be assigned as if it is an id]
+* Te (TypeExpression)           [Pointer types, arrays, etc.]
+* A (Args)                      [Zero or more comma-separated expressions in parentheses]
+* B (Binary Operator)           [+, -, *, /, &&, ||, &, |, ^, ==, !=, >, >=, <, <=]
+* U (Unary Operator)            [!, -, *, &]
+* F (Function)                  [Function declaration]
+* Fs (Functions)                [One or more consecutive functions]
+* I (Import)                    ["import file.bud;"]
+* Is (Imports)                  [One or more consecutive imports]
+* Vss (Variables Declarations in parentheses)   [Comma-separated]
+* Vs (Variable Declarations)    [Comma-separated]
+* V (Variable Declaration)      [A type and a name (no assignment)]
+* Oc ()                         [Open and close parentheses]
+
+Terminals:
+* id
+* num
+* str
+* char
+* if
+* unless
+* else
+* (
+* )
+* {
+* }
+* [
+* ]
+* ;
+* =
+* import
+* return
+* do
+* while
+* break
+* continue
+
+# -, *, and & are terminals that can be Binops or Unops
+* +
+* -
+* *
+* /
+* &&
+* ||
+* &
+& |
+& ^
+* ==
+* !=
+* >
+* >=
+* <
+* <=
+* !
+
+# Program
+S' -> P$
+P -> Is Fs
+P -> Fs
+F -> V Vss E
+V -> Ie id
+
+# Lists
+Is -> I Is
+Is -> I
+
+Fs -> F Fs
+Fs -> F
+
+Es -> E, Es
+Es -> E
+A -> Oc
+A -> (Es)
+Oc -> ()
+
+
+
+Vs -> V, Vs
+Vs -> V
+Vss -> Oc
+Vss -> (Vs)
+
+# Statements
+E -> { E2 }
+E2 -> E E2      # 2 expressions in a row will sometimes pass the grammar
+E2 -> E         # checker (and it should be allowed, since statements are
+                # expressions), but if the first is not a statement 
+                # expression, it will be caught by the expander.
+
+
+# Expressions
+E -> E;
+E -> Ie = E
+E -> V
+E -> V = E
+E -> Te A       # Function call - This will not always be a TypeExpression.
+                # If it is, a cast is occurring.
+                # Sometimes it will just be an id, but the expander will 
+                # distinguish between the two.
+E -> E B E
+E -> U E
+E -> (E)
+E -> if (E) E
+E -> if (E) E else E
+E -> unless (E) E
+E -> unless (E) E else E
+E -> while (E) E
+E -> do E while (E)
+
+Ie -> E[E]      # If this is illegal, it will be caught by the expander.
+Ie -> id
+Te -> id
+Te -> Te[num]
+Te -> *(Te)
+
+# Literals
+E -> Ie
+E -> num
+E -> str
+E -> char
+E -> break
+E -> continue
+
+# Operators
+B -> +
+B -> -
+B -> *
+B -> /
+B -> &&
+B -> ||
+B -> &
+B -> |
+B -> ^
+B -> ==
+B -> !=
+B -> >
+B -> >=
+B -> <
+B -> <=
+U -> !
+U -> *
+U -> &
+U -> -

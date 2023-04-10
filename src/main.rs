@@ -2,9 +2,11 @@
 // pub mod slp_names;
 // pub mod lexer;
 // use crate::lexer::*;
+extern crate proc_macros;
 
 pub mod grammar;
 pub mod slp;
+pub mod bud;
 
 pub mod slp_symbols;
 use logos::Logos;
@@ -49,6 +51,20 @@ fn main() {
     use slp::SLPNonTerminal::*;
     use slp::SLPTerminal::*;
     use grammar::Symbol::*;
+    // let mut g : Grammar<SLPTerminal, SLPNonTerminal> = Grammar::new(
+    //     vec![
+    //         Der{ from: Start,    to: vec![NonTm(Stm), Tm(EOF)] },
+    //         Der{ from: Stm,      to: vec![NonTm(Stm), Tm(Semicolon), NonTm(Stm)] },
+    //         Der{ from: Stm,      to: vec![Tm(IdGen), Tm(Assign), NonTm(Exp)] },
+    //         Der{ from: Stm,      to: vec![Tm(Print), NonTm(ExpList), Tm(RightParen)] },
+    //         Der{ from: Exp,      to: vec![Tm(IdGen)] },
+    //         Der{ from: Exp,      to: vec![Tm(NumGen)] },
+    //         Der{ from: Exp,      to: vec![NonTm(Exp), Tm(OperatorGen), NonTm(Exp)] },
+    //         Der{ from: Exp,      to: vec![Tm(LeftParen), NonTm(Stm), Tm(Comma), NonTm(Exp), Tm(RightParen)] },
+    //         Der{ from: ExpList,  to: vec![NonTm(Exp), Tm(Comma), NonTm(ExpList)] },
+    //         Der{ from: ExpList,  to: vec![NonTm(Exp)] },
+    //     ],
+    // );
     let mut g : Grammar<SLPTerminal, SLPNonTerminal> = Grammar::new(
         vec![
             Der{ from: Start,    to: vec![NonTm(Stm), Tm(EOF)] },

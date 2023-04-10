@@ -1,0 +1,302 @@
+use std::fmt::{Debug, Display};
+
+use crate::grammar;
+
+grammar::grammar!(
+    BudTerminal: {
+        #[regex("[0-9]+")]
+        NumGen,
+        #[regex(r#""([^"]*)""#)]
+        StrGen,
+        #[regex(r"'(\\[^\n]|[^\\])'")]
+        CharGen
+        #[token("(")]
+        LeftRound,
+        #[token(")")]
+        RightRound,
+        #[token("{")]
+        LeftSquiggly,
+        #[token("}")]
+        RightSquiggly,
+        #[token("[")]
+        LeftSquare,
+        #[token("]")]
+        RightSquare,
+        #[token(";")]
+        Semicolon,
+        #[token("=")]
+        Assign,
+
+        Num(i32),
+        Str(String),
+        Char(String),
+        Id(String),
+
+        #[token("if")]
+        If,
+        #[token("unless")]
+        Unless,
+        #[token("else")]
+        Else,
+        #[token("import")]
+        Import,
+        #[token("return")]
+        Return,
+        #[token("do")]
+        Do,
+        #[token("while")]
+        While,
+        #[token("break")]
+        Break,
+        #[token("continue")]
+        Continue,
+        #[regex(r"[a-zA-Z]")]
+        IdGen,
+
+        #[token("+")]
+        Plus,
+        #[token("-")]
+        Minus,
+        #[token("*")]
+        Star,
+        #[token("/")]
+        Div,
+        #[token("&&")]
+        And,
+        #[token("||")]
+        Or,
+        #[token("&")]
+        Ambersand,
+        #[token("|")]
+        BitOr,
+        #[token("^")]
+        BitXor,
+        #[token("==")]
+        Equal,
+        #[token("!=")]
+        NotEq,
+        #[token(">")]
+        Greater,
+        #[token(">=")]
+        GrtrEq,
+        #[token("<")]
+        Less,
+        #[token("<=")]
+        LessEq,
+        #[token("!")]
+        Not
+
+
+        // Logos requires one token variant to handle errors,
+        // it can be named anything you wish.
+        #[error]
+        Error,
+        EOF,
+        // We can also use this variant to define whitespace,
+        // or any other matches we wish to skip.
+        #[regex(r"[ \t\n\f]+", logos::skip)]
+        Whitespace,
+    },
+    BudNonTerminal: {
+        Start,
+        Prog,
+        Exp,
+        Exp2,
+        Exps,
+        IdExp,
+        TypExp,
+        Args,
+        Binop,
+        Unop,
+        Func,
+        Funcs,
+        Imprt,
+        Imprts,
+        Vss,
+        Vs,
+        V,
+        Oc,
+    },
+    get_bud_grammar: {
+        // Program
+        Start   => Prog, EOF;
+        Prog    => Imprts, Funcs,
+        Prog    => Funcs
+        Func    => V, Vss, E;
+        Vs      => IdExp, id;
+
+        // Lists
+        Imprts  => Imprt, Imprts;
+        Imprts  => Imprt;
+
+        Funcs   => Func, Funcs;
+        Funcs   => Func;
+
+        Exps    => Exp, Comma, Exps;
+        Exps    => Exp;
+        A       => Oc;
+        A       => LeftRound, Exps, RightRound;
+        Oc      => LeftRound, RightRound;
+
+        Vs      => V, Vs;
+        Vs      => V;
+        Vss     => Oc;
+        Vss     => LeftRound, Vs, RightRound;
+
+        // Statements
+        Exp     => LeftSquiggly, Exp2, RightSquiggly;
+        Exp2    => Exp, Exp2;       // 2 expressions in a row will sometimes pass the grammar
+        Exp2    => Exp;             // checker (and it should be allowed, since statements are
+                                    // expressions), but if the first is not a statement 
+                                    // expression, it will be caught by the expander.
+        
+        // Expressions
+        Exp     => Exp, Semicolon;
+        Exp     => IdExp, Assign, Exp;
+        Exp     => V;
+        Exp     => V, Assign, Exp;
+        Exp     => TypExp, Args;    // Function call - This will not always be a TypeExpression.
+                                    // If it is, a cast is occurring.
+                                    // Sometimes it will just be an id, but the expander will 
+                                    // distinguish between the two.
+        Exp     => Exp, Binop, Exp;
+        Exp     => Unop, Exp;
+        Exp     => LeftRound, Exp, RightRound;
+        Exp     => If, LeftRound, Exp, RightRound, Exp;
+        Exp     => If, LeftRound, Exp, RightRound, Exp, Else, Exp;
+        Exp     => Unless, LeftRound, Exp, RightRound, Exp;
+        Exp     => Unless, LeftRound, Exp, RightRound, Exp, Else, Exp;
+        Exp     => While, LeftRound, Exp, RightRound, Exp;
+        Exp     => Do, Exp, While, LeftRound, Exp, RightRound;
+
+
+        IdExp   => Exp, LeftSquare, Exp, RightSquare;   // If this is illegal (because it is not indexable), it will be caught by the expander
+        IdExp   => IdGen;
+        TypExp  => IdGen;
+        TypExp  => TypExp, LeftSquare, NumGen, RightSquare;
+        TypExp  => Star, LeftRound, TypExp, RightRound;
+
+        // Literals
+        Exp     => IdExp;
+        Exp     => NumGen;
+        Exp     => StrGen;
+        Exp     => CharGen;
+        Exp     => Break;
+        Exp     => Continue;
+
+        // Operators
+        Binop   => Plus;
+        Binop   => Minus;
+        Binop   => Star;
+        Binop   => Div;
+        Binop   => And;
+        Binop   => Or;
+        Binop   => Ambersand;
+        Binop   => BitOr;
+        Binop   => BitXor;
+        Binop   => Equal;
+        Binop   => NotEq;
+        Binop   => Greater;
+        Binop   => GrtrEq;
+        Binop   => Less;
+        Binop   => LessEq;
+        Unop    => Not;
+        Unop    => Star;
+        Unop    => Ambersand;
+        Unop    => Minus;
+
+    }
+);
+
+pub fn load_bud_data(t: BudTerminal, slice: &str) -> BudTerminal {
+    match t {
+        BudTerminal::IdGen => BudTerminal::Id(slice.to_string()),
+        BudTerminal::NumGen => BudTerminal::Num(
+            if let Ok(num) = slice.parse() {
+                num
+            } else {
+                panic!("Invalid number: {}", slice)
+            }
+        ),
+        BudTerminal::OperatorGen => {
+            match slice {
+                "+" => BudTerminal::Operator(BudBinop::Plus),
+                "-" => BudTerminal::Operator(BudBinop::Minus),
+                "*" => BudTerminal::Operator(BudBinop::Times),
+                "/" => BudTerminal::Operator(BudBinop::Div),
+                // TODO Fill in rest of Bud binops and unops when doing Bud grammer
+                _ => panic!("Invalid operator: {}", slice)
+            }
+        }
+        _ => t
+    }
+}
+
+
+#[derive(PartialEq, Eq, Clone, Hash)]
+pub enum BudBinop {
+    Plus,
+    Minus,
+    Times,
+    Div,
+    And,
+    Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Equal,
+    NotEq,
+}
+impl Display for BudBinop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BudBinop::Plus => "+",
+                BudBinop::Minus => "-",
+                BudBinop::Times => "*",
+                BudBinop::Div => "/",
+                BudBinop::And => "&&",
+                BudBinop::Or => "||",
+                BudBinop::BitAnd => "&",
+                BudBinop::BitOr => "|",
+                BudBinop::BitXor => "^",
+                BudBinop::Equal => "==",
+                BudBinop::NotEq => "!=",
+            }
+        )
+    }
+}
+impl Debug for BudBinop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Hash)]
+pub enum BudUnop {
+    Not,
+    Neg,
+    Deref,
+    Ref,
+}
+impl Display for BudUnop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BudUnop::Not =>     "!",
+                BudUnop::Neg =>     "-",
+                BudUnop::Deref =>   "*",
+                BudUnop::Ref =>     "&",
+            }
+        )
+    }
+}
+impl Debug for BudUnop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}

@@ -1,0 +1,30 @@
+Grammar for SLP
+
+Non-terminals
+* S'
+* S
+* E
+* L
+
+Terminals
+* id
+* num
+* B
+* print(
+* ;
+* :=
+* (
+* )
+* ,
+
+Grammar
+S' -> S$
+S -> S; S
+S -> id := E
+S -> print( L )
+E -> id
+E -> num
+E -> E B E
+E -> (S, E)
+L -> E, L
+L -> E

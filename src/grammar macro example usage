@@ -1,0 +1,74 @@
+
+grammar!(
+    Name: Bud
+    Terminals: {
+        Id,
+        Num,
+        Binop,
+        Print,
+        Semicolon,
+        Assign,
+        LeftParen,
+        RightParen,
+        Comma,
+        EOF,
+        Error,
+    },
+    NonTerminals: {
+        Start,
+        Stm,
+        Exp,
+        ExpList,
+    },
+    Grammar: {
+        Start => Stm EOF,
+        Stm => Stm Semicolon Stm,
+        Stm => Id Assign Exp,
+        Stm => Print ExpList RightParen,
+        Exp => Id,
+        Exp => Num,
+        Exp => Exp Binop Exp,
+        Exp => LeftParen Stm Comma Exp RightParen,
+        ExpList => Exp Comma ExpList,
+        ExpList => Exp,
+    }
+);
+
+// Expands to:
+pub enum BudTerminal {
+    Id,
+    Num,
+    Binop,
+    Print,
+    Semicolon,
+    Assign,
+    LeftParen,
+    RightParen,
+    Comma,
+    EOF,
+    Error,
+}
+
+pub enum BudNonTerminal {
+    Start,
+    Stm,
+    Exp,
+    ExpList,
+}
+
+fn get_bud_grammar() -> Grammar {
+    Grammar::new(
+        vec![
+            grammar::Der{ from: Start,    to: vec![Node::NonTm(Stm), Node::Tm(EOF)] },
+            grammar::Der{ from: Stm,      to: vec![Node::NonTm(Stm), Node::Tm(Semicolon), Node::NonTm(Stm)] },
+            grammar::Der{ from: Stm,      to: vec![Node::Tm(IdGen), Node::Tm(Assign), Node::NonTm(Exp)] },
+            grammar::Der{ from: Stm,      to: vec![Node::Tm(Print), Node::NonTm(ExpList), Node::Tm(RightParen)] },
+            grammar::Der{ from: Exp,      to: vec![Node::Tm(IdGen)] },
+            grammar::Der{ from: Exp,      to: vec![Node::Tm(NumGen)] },
+            grammar::Der{ from: Exp,      to: vec![Node::NonTm(Exp), Node::Tm(OperatorGen), Node::NonTm(Exp)] },
+            grammar::Der{ from: Exp,      to: vec![Node::Tm(LeftParen), Node::NonTm(Stm), Node::Tm(Comma), Node::NonTm(Exp), Node::Tm(RightParen)] },
+            grammar::Der{ from: ExpList,  to: vec![Node::NonTm(Exp), Node::Tm(Comma), Node::NonTm(ExpList)] },
+            grammar::Der{ from: ExpList,  to: vec![Node::NonTm(Exp)] },
+        ],
+    );
+}
