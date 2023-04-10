@@ -9,7 +9,7 @@ grammar::grammar!(
         #[regex(r#""([^"]*)""#)]
         StrGen,
         #[regex(r"'(\\[^\n]|[^\\])'")]
-        CharGen
+        CharGen,
         #[token("(")]
         LeftRound,
         #[token(")")]
@@ -84,7 +84,7 @@ grammar::grammar!(
         #[token("<=")]
         LessEq,
         #[token("!")]
-        Not
+        Not,
 
 
         // Logos requires one token variant to handle errors,
@@ -120,8 +120,8 @@ grammar::grammar!(
     get_bud_grammar: {
         // Program
         Start   => Prog, EOF;
-        Prog    => Imprts, Funcs,
-        Prog    => Funcs
+        Prog    => Imprts, Funcs;
+        Prog    => Funcs;
         Func    => V, Vss, E;
         Vs      => IdExp, id;
 
@@ -134,8 +134,8 @@ grammar::grammar!(
 
         Exps    => Exp, Comma, Exps;
         Exps    => Exp;
-        A       => Oc;
-        A       => LeftRound, Exps, RightRound;
+        Args    => Oc;
+        Args    => LeftRound, Exps, RightRound;
         Oc      => LeftRound, RightRound;
 
         Vs      => V, Vs;
@@ -218,16 +218,8 @@ pub fn load_bud_data(t: BudTerminal, slice: &str) -> BudTerminal {
                 panic!("Invalid number: {}", slice)
             }
         ),
-        BudTerminal::OperatorGen => {
-            match slice {
-                "+" => BudTerminal::Operator(BudBinop::Plus),
-                "-" => BudTerminal::Operator(BudBinop::Minus),
-                "*" => BudTerminal::Operator(BudBinop::Times),
-                "/" => BudTerminal::Operator(BudBinop::Div),
-                // TODO Fill in rest of Bud binops and unops when doing Bud grammer
-                _ => panic!("Invalid operator: {}", slice)
-            }
-        }
+        BudTerminal::StrGen => BudTerminal::Str(slice.to_string()),
+        BudTerminal::CharGen => BudTerminal::Char(slice.to_string()),
         _ => t
     }
 }
@@ -298,5 +290,87 @@ impl Display for BudUnop {
 impl Debug for BudUnop {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self)
+    }
+}
+
+impl std::fmt::Display for BudTerminal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", 
+            match self {
+                BudTerminal::NumGen         => "num".to_string(),
+                BudTerminal::StrGen         => "str".to_string(),
+                BudTerminal::CharGen        => "char".to_string(),
+                BudTerminal::LeftRound      => "(".to_string(),
+                BudTerminal::RightRound     => ")".to_string(),
+                BudTerminal::LeftSquiggly   => "{".to_string(),
+                BudTerminal::RightSquiggly  => "}".to_string(),
+                BudTerminal::LeftSquare     => "[".to_string(),
+                BudTerminal::RightSquare    => "]".to_string(),
+                BudTerminal::Semicolon      => ";".to_string(),
+                BudTerminal::Assign         => "=".to_string(),
+                BudTerminal::Num(n)         => n.to_string(),
+                BudTerminal::Str(s)         => s.to_string(),
+                BudTerminal::Char(c)        => c.to_string(),
+                BudTerminal::Id(id)         => id.to_string(),
+                BudTerminal::If             => "if".to_string(),
+                BudTerminal::Unless         => "unless".to_string(),
+                BudTerminal::Else           => "else".to_string(),
+                BudTerminal::Import         => "import".to_string(),
+                BudTerminal::Return         => "return".to_string(),
+                BudTerminal::Do             => "do".to_string(),
+                BudTerminal::While          => "while".to_string(),
+                BudTerminal::Break          => "break".to_string(),
+                BudTerminal::Continue       => "continue".to_string(),
+                BudTerminal::IdGen          => "id".to_string(),
+                BudTerminal::Plus           => "+".to_string(),
+                BudTerminal::Minus          => "-".to_string(),
+                BudTerminal::Star           => "*".to_string(),
+                BudTerminal::Div            => "/".to_string(),
+                BudTerminal::And            => "&&".to_string(),
+                BudTerminal::Or             => "||".to_string(),
+                BudTerminal::Ambersand      => "&".to_string(),
+                BudTerminal::BitOr          => "|".to_string(),
+                BudTerminal::BitXor         => "^".to_string(),
+                BudTerminal::Equal          => "==".to_string(),
+                BudTerminal::NotEq          => "!=".to_string(),
+                BudTerminal::Greater        => ">".to_string(),
+                BudTerminal::GrtrEq         => ">=".to_string(),
+                BudTerminal::Less           => "<".to_string(),
+                BudTerminal::LessEq         => "<=".to_string(),
+                BudTerminal::Not            => "!".to_string(),
+                BudTerminal::Error          => "ERROR".to_string(),
+                BudTerminal::EOF            => "EOF".to_string(),
+                BudTerminal::Whitespace     => "WHITESPACE".to_string(),
+            }
+        )
+
+    }
+}
+
+impl std::fmt::Display for BudNonTerminal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", 
+            match self {
+                BudNonTerminal::Start       => "S'",
+                BudNonTerminal::Prog        => "P",
+                BudNonTerminal::Exp         => "E",
+                BudNonTerminal::Exp2        => "E2",
+                BudNonTerminal::Exps        => "Es",
+                BudNonTerminal::IdExp       => "Ie",
+                BudNonTerminal::TypExp      => "Te",
+                BudNonTerminal::Args        => "A",
+                BudNonTerminal::Binop       => "B",
+                BudNonTerminal::Unop        => "U",
+                BudNonTerminal::Func        => "F",
+                BudNonTerminal::Funcs       => "Fs",
+                BudNonTerminal::Imprt       => "I",
+                BudNonTerminal::Imprts      => "Is",
+                BudNonTerminal::Vss         => "Vss",
+                BudNonTerminal::Vs          => "Vs",
+                BudNonTerminal::V           => "V",
+                BudNonTerminal::Oc          => "Oc",
+            }
+        )
+
     }
 }

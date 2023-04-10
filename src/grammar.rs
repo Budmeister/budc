@@ -615,6 +615,7 @@ macro_rules! grammar {
         pub enum $term_name {
             $( $(#[$meta])* $terminal $(($($term_param),*))?),+,
         }
+        #[derive(::std::cmp::PartialEq, ::std::cmp::Eq, ::std::clone::Clone, ::std::hash::Hash)]
         pub enum $nonterm_name {
             $($non_terminal),+
         }
