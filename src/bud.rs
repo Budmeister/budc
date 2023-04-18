@@ -50,7 +50,7 @@ grammar::grammar!(
         Break,
         #[token("continue")]
         Continue,
-        #[regex(r"[a-zA-Z]")]
+        #[regex(r"[_a-zA-Z]([_a-zA-Z0-9])*")]
         IdGen,
 
         #[token("+")]
@@ -90,12 +90,11 @@ grammar::grammar!(
         // Logos requires one token variant to handle errors,
         // it can be named anything you wish.
         #[error]
-        Error,
-        EOF,
         // We can also use this variant to define whitespace,
         // or any other matches we wish to skip.
-        #[regex(r"[ \t\n\f]+", logos::skip)]
-        Whitespace,
+        #[regex(r"[ \t\n\r\f]+", logos::skip)]
+        Error,
+        EOF,
     },
     BudNonTerminal: {
         Start,
@@ -123,7 +122,7 @@ grammar::grammar!(
         Prog    => Imprts, Funcs;
         Prog    => Funcs;
         Func    => V, Vss, E;
-        Vs      => IdExp, id;
+        V       => TypExp, id;
 
         // Lists
         Imprts  => Imprt, Imprts;
@@ -340,7 +339,6 @@ impl std::fmt::Display for BudTerminal {
                 BudTerminal::Not            => "!".to_string(),
                 BudTerminal::Error          => "ERROR".to_string(),
                 BudTerminal::EOF            => "EOF".to_string(),
-                BudTerminal::Whitespace     => "WHITESPACE".to_string(),
             }
         )
 

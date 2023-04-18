@@ -1,0 +1,204 @@
+ders.len(): 64
+S' -> PEOF
+P -> IsFs
+P -> Fs
+F -> VVss
+V -> Te
+Is -> IIs
+Is -> I
+Fs -> FFs
+Fs -> F
+Es -> EEs
+Es -> E
+A -> Oc
+A -> (Es)
+Oc -> ()
+Vs -> VVs
+Vs -> V
+Vss -> Oc
+Vss -> (Vs)
+E -> {E2}
+E2 -> EE2
+E2 -> E
+E -> E;
+E -> Ie=E
+E -> V
+E -> V=E
+E -> TeA
+E -> EBE
+E -> UE
+E -> (E)
+E -> if(E)E
+E -> if(E)EelseE
+E -> unless(E)E
+E -> unless(E)EelseE
+E -> while(E)E
+E -> doEwhile(E)
+Ie -> E[E]
+Ie -> id
+Te -> id
+Te -> Te[num]
+Te -> *(Te)
+E -> Ie
+E -> num
+E -> str
+E -> char
+E -> break
+E -> continue
+B -> +
+B -> -
+B -> *
+B -> /
+B -> &&
+B -> ||
+B -> &
+B -> |
+B -> ^
+B -> ==
+B -> !=
+B -> >
+B -> >=
+B -> <
+B -> <=
+U -> !
+U -> *
+U -> &
+Goto 1 on I
+Goto 2 on Is
+Goto 3 on F
+id: 0 -> 4
+Goto 5 on Te
+*: 0 -> 6
+Goto 7 on V
+Goto 8 on Fs
+Goto 9 on P
+Goto 1 on I
+Goto 10 on Is
+Goto 3 on F
+id: 2 -> 4
+Goto 5 on Te
+*: 2 -> 6
+Goto 7 on V
+Goto 11 on Fs
+Goto 3 on F
+id: 3 -> 4
+Goto 5 on Te
+*: 3 -> 6
+Goto 7 on V
+Goto 12 on Fs
+[: 5 -> 13
+(: 6 -> 14
+(: 7 -> 15
+Goto 16 on Oc
+Goto 17 on Vss
+EOF: 9 -> 18
+num: 13 -> 19
+id: 14 -> 20
+Goto 21 on Te
+*: 14 -> 22
+Goto 23 on V
+id: 15 -> 20
+Goto 24 on Te
+*: 15 -> 22
+Goto 25 on Vs
+): 15 -> 26
+]: 19 -> 27
+): 21 -> 28
+[: 21 -> 29
+(: 22 -> 30
+Goto 23 on V
+id: 23 -> 20
+Goto 24 on Te
+*: 23 -> 22
+Goto 31 on Vs
+[: 24 -> 29
+): 25 -> 32
+num: 29 -> 33
+id: 30 -> 20
+Goto 34 on Te
+*: 30 -> 22
+]: 33 -> 35
+): 34 -> 36
+[: 34 -> 29
+0: [S' -> .PEOF, [], P -> .Fs, [EOF], Fs -> .F, [EOF], F -> .VVss, [*, id, EOF], V -> .Te, [(], Te -> .*(Te), [[, (], Te -> .Te[num], [[, (], Te -> .id, [(, [], Fs -> .FFs, [EOF], P -> .IsFs, [EOF], Is -> .I, [id, *], Is -> .IIs, [id, *]]
+1: [Is -> I.Is, [id, *], Is -> .I, [id, *], Is -> .IIs, [*, id], Is -> I., [id, *]]
+2: [P -> Is.Fs, [EOF], Fs -> .F, [EOF], F -> .VVss, [EOF, *, id], V -> .Te, [(], Te -> .*(Te), [(, [], Te -> .Te[num], [[, (], Te -> .id, [(, [], Fs -> .FFs, [EOF]]
+3: [Fs -> F.Fs, [EOF], Fs -> .F, [EOF], F -> .VVss, [EOF, id, *], V -> .Te, [(], Te -> .*(Te), [(, [], Te -> .Te[num], [[, (], Te -> .id, [(, [], Fs -> .FFs, [EOF], Fs -> F., [EOF]]
+4: [Te -> id., [(, []]
+5: [Te -> Te.[num], [[, (], V -> Te., [(]]
+6: [Te -> *.(Te), [[, (]]
+7: [F -> V.Vss, [*, id, EOF], Vss -> .(Vs), [id, *, EOF], Vss -> .Oc, [EOF, id, *], Oc -> .(), [*, EOF, id]]
+8: [P -> Fs., [EOF]]
+9: [S' -> P.EOF, []]
+10: [Is -> IIs., [id, *]]
+11: [P -> IsFs., [EOF]]
+12: [Fs -> FFs., [EOF]]
+13: [Te -> Te[.num], [[, (]]
+14: [Te -> *(.Te), [[, (], Te -> .*(Te), [[, )], Te -> .Te[num], [[, )], Te -> .id, [), []]
+15: [Oc -> (.), [*, EOF, id], Vss -> (.Vs), [id, *, EOF], Vs -> .V, [)], V -> .Te, [), *, id], Te -> .*(Te), [), [], Te -> .Te[num], [), [], Te -> .id, [[, )], Vs -> .VVs, [)]]
+16: [Vss -> Oc., [EOF, id, *]]
+17: [F -> VVss., [*, id, EOF]]
+18: [S' -> PEOF., []]
+19: [Te -> Te[num.], [[, (]]
+20: [Te -> id., [), []]
+21: [Te -> Te.[num], [[, )], Te -> *(Te.), [[, (]]
+22: [Te -> *.(Te), [[, )]]
+23: [Vs -> V.Vs, [)], Vs -> .V, [)], V -> .Te, [), *, id], Te -> .*(Te), [[, )], Te -> .Te[num], [[, )], Te -> .id, [), [], Vs -> .VVs, [)], Vs -> V., [)]]
+24: [Te -> Te.[num], [), [], V -> Te., [), *, id]]
+25: [Vss -> (Vs.), [id, *, EOF]]
+26: [Oc -> ()., [*, EOF, id]]
+27: [Te -> Te[num]., [[, (]]
+28: [Te -> *(Te)., [[, (]]
+29: [Te -> Te[.num], [[, )]]
+30: [Te -> *(.Te), [[, )], Te -> .*(Te), [[, )], Te -> .Te[num], [[, )], Te -> .id, [), []]
+31: [Vs -> VVs., [)]]
+32: [Vss -> (Vs)., [id, *, EOF]]
+33: [Te -> Te[num.], [[, )]]
+34: [Te -> Te.[num], [[, )], Te -> *(Te.), [[, )]]
+35: [Te -> Te[num]., [[, )]]
+36: [Te -> *(Te)., [[, )]]
+	num	str	char	(	)	{	}	[	]	;	=	if	unless	else	import	return	do	while	break	continue	id	+	-	*	/	&&	||	&	|	^	==	!=	>	>=	<	<=	!	S'	P	E	E2	Es	Ie	Te	A	B	U	F	Fs	I	Is	Vss	Vs	V	Oc	
+0																					s4			s6															g9					g5				g3	g8	g1	g2			g7		
+1																					r1			r1																										g1	g10					
+2																					s4			s6																				g5				g3	g11					g7		
+3																					s4			s6																				g5				g3	g12					g7		
+4				r1				r1																																																
+5				r1				s13																																																
+6				s14																																																				
+7				s15																																																g17			g16	
+8																																																								
+9																																																								
+10																					r2			r2																																
+11																																																								
+12																																																								
+13	s19																																																							
+14																					s20			s22																				g21												
+15					s26																s20			s22																				g24									g25	g23		
+16																					r1			r1																																
+17																					r2			r2																																
+18																																																								
+19									s27																																															
+20					r1			r1																																																
+21					s28			s29																																																
+22				s30																																																				
+23					r1																s20			s22																				g24									g31	g23		
+24					r1			s29													r1			r1																																
+25					s32																																																			
+26																					r2			r2																																
+27				r4				r4																																																
+28				r4				r4																																																
+29	s33																																																							
+30																					s20			s22																				g34												
+31					r2																																																			
+32																					r3			r3																																
+33									s35																																															
+34					s36			s29																																																
+35					r4			r4																																																
+36					r4			r4																																																
+Calling do_action(id, Some(s4), stack, 0, states)
+Acting on token id in state 0/0
+Shifting state 4 onto the stack
+Stack: [0, 4]
+Calling do_action(id, None, stack, 4, states)
+Acting on token id in state 4/4
+Syntax Error on token id at location 9 (state 4). Expected: [LeftSquare, LeftRound]

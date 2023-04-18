@@ -1,4 +1,5 @@
 Grammar for the Bud programming language
+Version 0.1.0
 
 Non-terminals:
 * S' (Start)
