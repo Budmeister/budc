@@ -1,134 +1,164 @@
 Grammar for the Bud programming language
-Version 0.1.0
+Version 0.2.0
 
 Non-terminals:
-* S' (Start)
-* P (Program)
-* E (Expression)                [assignment, declaration, function calls, array indexing, combinations, etc.]
-* E2 (Expression 2)             [One or more expressions in a row--for statement expressions]
-* Es (Expressions)              [One or more comma-separated expressions]
-* Ie (IdExpression)             [Expression that can be assigned as if it is an id]
-* Te (TypeExpression)           [Pointer types, arrays, etc.]
-* A (Args)                      [Zero or more comma-separated expressions in parentheses]
-* B (Binary Operator)           [+, -, *, /, &&, ||, &, |, ^, ==, !=, >, >=, <, <=]
-* U (Unary Operator)            [!, -, *, &]
-* F (Function)                  [Function declaration]
-* Fs (Functions)                [One or more consecutive functions]
-* I (Import)                    ["import file.bud;"]
-* Is (Imports)                  [One or more consecutive imports]
-* Vss (Variables Declarations in parentheses)   [Comma-separated]
-* Vs (Variable Declarations)    [Comma-separated]
-* V (Variable Declaration)      [A type and a name (no assignment)]
-* Oc ()                         [Open and close parentheses]
+S' (Start)
+Is (Items)              [One or more functions, structs, imports, etc.]
+I (Item)                [A function, struct, import, etc.]
+F (FuncDecl)            [Function declaration]
+S (StructDecl)          [Struct declaration]
+Im (ImportDecl)         [File import]
+As (Args)               [Zero or more comma-separated VarDecls in parentheses]
+Vsp (VarDeclsPar)       [VarDecls with parentheses]
+Vs (VarDecls)           [Comma-separated VarDecls]
+V (VarDecl)             [A type and a name (no assignment)]
+E (Expr)                [assignment, declaration, function calls, array indexing, combinations, etc.]
+Te (TypeExpr)           [Pointer types, arrays, etc.]
+E2 (Expr2)              [One or more expressions in a row--for statement expressions]
+Es (Exprs)              [One or more comma-separated expressions]
+Nbe (NonBinExpr)        [An expression that is not a binary expression]
+Ble (BlockExpr)         [An Expr2 in squiggly brackets]
+Ae (AssignExpr)         [IdExpr = Expr]
+Va (VarDeclAssgn)       [Variable declaration and assignment]
+Re (ReturnExpression)   [Return statement]
+Ie (IdExpr)             [Expression that can be assigned as if it is an id]
+Le (LitExpr)            [Literal expression, int, string, char]
+Pe (ParenExpr)          [Parenthetical Expression]
+Ue (UnaryExpr)          [Expression with a unary operator in front]
+Be (BinaryExpr)         [A NonBinExpr or a NonBinExpr, a binary operator, and a BinaryExpr]
+~~Fc (FuncCall)           [An id followed by Args]~~ This will count as an IdExpr
+If (IfExpr)             
+Ife (IfElse)
+Ul (UnlExpr)
+Ule (UnlElse)
+We (WhileExpr)
+Dw (DoWhile)
+U (UnaryOp)             [!, -, *, &]
+B (BinOp)               [+, -, *, /, &&, ||, &, |, ^, ==, !=, >, >=, <, <=]
+
 
 Terminals:
-* id
-* num
-* str
-* char
-* if
-* unless
-* else
-* (
-* )
-* {
-* }
-* [
-* ]
-* ;
-* =
-* import
-* return
-* do
-* while
-* break
-* continue
+id
+num
+str
+char
+if
+unless
+else
+(
+)
+{
+}
+[
+]
+;
+,
+=
+import
+return
+do
+while
+break
+continue
+struct
 
-# -, *, and & are terminals that can be Binops or Unops
-* +
-* -
-* *
-* /
-* &&
-* ||
-* &
-& |
-& ^
-* ==
-* !=
-* >
-* >=
-* <
-* <=
-* !
++
+-
+*
+/
+&&
+||
+&
+"
+^
+==
+!=
+>=
+<
+<=
+!
 
+
+Grammar:
 # Program
-S' -> P$
-P -> Is Fs
-P -> Fs
-F -> V Vss E
+S' -> Is
+I -> F
+I -> S
+I -> Im
+F -> V Vsp E
+S -> struct id { Vs }
 V -> Ie id
 
 # Lists
 Is -> I Is
 Is -> I
 
-Fs -> F Fs
-Fs -> F
-
 Es -> E, Es
 Es -> E
-A -> Oc
+A -> ()
 A -> (Es)
-Oc -> ()
-
-
 
 Vs -> V, Vs
 Vs -> V
-Vss -> Oc
-Vss -> (Vs)
+Vsp -> ()
+Vsp -> (Vs)
 
 # Statements
-E -> { E2 }
 E2 -> E E2      # 2 expressions in a row will sometimes pass the grammar
 E2 -> E         # checker (and it should be allowed, since statements are
                 # expressions), but if the first is not a statement 
                 # expression, it will be caught by the expander.
 
-
 # Expressions
+E -> Be         # Since NonBinExpr work as BinaryExpr
 E -> E;
-E -> Ie = E
-E -> V
-E -> V = E
-E -> Te A       # Function call - This will not always be a TypeExpression.
-                # If it is, a cast is occurring.
-                # Sometimes it will just be an id, but the expander will 
-                # distinguish between the two.
-E -> E B E
-E -> U E
-E -> (E)
-E -> if (E) E
-E -> if (E) E else E
-E -> unless (E) E
-E -> unless (E) E else E
-E -> while (E) E
-E -> do E while (E)
 
-Ie -> E[E]      # If this is illegal, it will be caught by the expander.
-Ie -> id
+Nbe -> Ble
+Nbe -> Ae
+Nbe -> Va
+Nbe -> Re
+Nbe -> Ie
+Nbe -> Le
+Nbe -> Pe
+Nbe -> Ue
+Nbe -> If
+Nbe -> Ife
+Nbe -> Ul
+Nbe -> Ule
+Nbe -> We
+Nbe -> Dw
+
 Te -> id
 Te -> Te[num]
 Te -> *(Te)
 
+Ble -> { E2 }
+Ae -> Ie = E
+Va -> V = E
+Re -> return
+Re -> return Expr
+Ie -> E[E]      # If this is illegal, it will be caught by the expander.
+Ie -> E(Es)     # Parenthetical indexing causes bounds checking at runtime.
+Ie -> id
+Pe -> ( E )
+Ue -> U Nbe
+Be -> Nbe B Be
+Be -> Nbe
+If -> if E { E }
+Ife -> if E { E } else { E }
+Ul -> unless E { E }
+Ule -> unless E { E } else { E }
+We -> while E { E }
+Dw -> do { E } while E;
+
+
 # Literals
-E -> Ie
-E -> num
-E -> str
-E -> char
-E -> break
-E -> continue
+Le -> num
+Le -> str
+Le -> char
+Nbe -> break
+Nbe -> continue
+Nbe -> return
 
 # Operators
 B -> +

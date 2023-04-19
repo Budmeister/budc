@@ -462,6 +462,95 @@ impl<T: PartialEq + Eq + Hash, N: PartialEq> PartialEq for State<T, N> {
     }
 }
 
+pub fn get_firsts_single<
+    T: Eq + Clone + Hash,
+    N: Eq + Clone + Display + Hash
+>(
+    g: &Grammar<T, N>,
+    n: N,
+    stack: &mut HashSet<N>,
+    firsts: &mut HashMap<N, HashSet<T>>,
+) -> Result<(), String> {
+    if let Some(_) = firsts.get(&n) {
+        // If the first for n2 is already calculated, no work to be done
+        // This is the base case
+        return Ok(());
+    }
+    let ders = &g.get_derivations_for(&n);
+    let mut first = HashSet::new();
+    for der in ders {
+        let vec = firsts.get_mut(&der.from);
+        if let Some(vec) = vec {
+            let sym = &der.to[0];
+            match sym {
+                Symbol::Tm(t) => {
+                    // The first of this derivation is just a terminal
+                    vec.insert(t.clone());
+                }
+                Symbol::NonTm(n2) => {
+                    if stack.contains(n2) {
+                        // Loop in grammar; just continue
+                        continue;
+                    }
+                    // We need to calculate the first of n2 and insert it into
+                    // the first of n
+                    stack.insert(n.clone());
+                    get_firsts_single(g, n2.clone(), stack, firsts)?;
+                    stack.remove(&n);
+                    if let Some(first2) = firsts.get(&n) {
+                        // Add all firsts from n2 to the firsts of n
+                        first.extend(first2.iter().map(|t| t.clone()));
+                    } else {
+                        return Err(format!("get_firsts_single subcall did not get firsts for {}", n2.to_string().blue()));
+                    }
+
+                }
+            }
+        } else {
+            return Err(format!(
+                "Firsts set not fully initialized for nonterminal, {}",
+                n.to_string().red()
+            ));
+        }
+    }
+    firsts.insert(n, first);
+    Ok(())
+}
+
+pub fn get_firsts<
+    T: Eq + Clone + Hash,
+    N: Eq + Clone + Display + Hash
+>(
+    g: &Grammar<T, N>,
+    ns: &Vec<N>,
+) -> Result<HashMap<N, Vec<T>>, String> {
+    todo!("get_firsts is not working");
+    let mut firsts = HashMap::new();
+    for n in ns {
+        firsts.insert(n.clone(), HashSet::new());
+    }
+    for n in ns {
+        get_firsts_single(g, n.clone(), &mut HashSet::new(), &mut firsts)?;
+    }
+    let firsts = firsts
+            .into_iter()
+            .map(|(n, hs)| (n, hs.into_iter().collect()))
+            .collect();
+    Ok(firsts)
+}
+
+pub fn print_firsts<
+    T: Eq + Clone + Display + Hash,
+    N: Eq + Clone + Display + Hash
+>(firsts: &HashMap<N, Vec<T>>) {
+    for (n, f) in firsts {
+        println!("{}: {}", n.to_string().blue(), f
+                                            .iter()
+                                            .fold(String::new(), |s, t| s + &t.to_string() + " ")
+        );
+    }
+}
+
 pub fn lr1_generate<
     T: PartialEq + Eq + Clone + Display + Hash,
     N: PartialEq + Eq + Clone + Display + Hash,
@@ -471,6 +560,8 @@ pub fn lr1_generate<
     ns: Vec<N>,
     ts: Vec<T>,
 ) -> Result<Vec<State<T, N>>, String> {
+    let firsts = get_firsts(g, &ns)?;
+    print_firsts(&firsts);
     let start_ders = g.get_derivations_for(&start);
     if start_ders.len() >= 2 {
         return Err(format!("Multiple starting derivations: {:?}", start_ders));
@@ -513,7 +604,9 @@ pub fn lr1_generate<
                 all_similar.append(
                     &mut queue
                         .iter()
-                        .filter(|der| der.dotted_sym() == Some(sym))
+                        .filter(|der| {
+                            der.dotted_sym() == Some(sym)
+                        })
                         .map(|der| der.clone())
                         .collect(),
                 );
@@ -580,23 +673,6 @@ pub fn lr1_generate<
     }
     print_action_table(&states, ns, ts);
     Ok(states)
-}
-
-
-#[macro_export]
-macro_rules! parse_symbol {
-    (true, false, $rhs:ident) => {
-        Node::Tm($rhs)
-    };
-    (false, true, $rhs:ident) => {
-        Node::NonTm($rhs)
-    };
-    (true, true, $rhs:ident) => {
-        compile_error!("Terminal and non-terminal token: {}", $rhs);
-    };
-    (false, false, $rhs:ident) => {
-        compile_error!("Invalid token: {}", $rhs);
-    };
 }
 
 macro_rules! grammar {
