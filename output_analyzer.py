@@ -454,7 +454,7 @@ commands = {
     "llevel":           (print_logging_level,                   "Print the logging level"),
     "loptions":         (print_logging_options,                 "Print logging options"),
     "ders":             (print_ders,                            "Print all derivations for the given symbol(s)"),
-    "first":            (print_firsts,                          "Prints the first set for the given symbol(s)"),
+    "first":            (print_firsts,                          "Print the first set for the given symbol(s)"),
     "state":            (print_state,                           "Pretty print the given state(s)"),
     "action":           (get_action,                            "Print the action for the given state and symbol OR all actions for a state"),
     "actions":          (print_actions,                         "Print the actions taken in parsing"),
