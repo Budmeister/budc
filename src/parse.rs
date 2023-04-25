@@ -1,6 +1,7 @@
-use crate::grammar::*;
+use crate::{grammar::*, logging::LoggingOptions};
 use colored::Colorize;
 use logos::{Lexer, Logos};
+use log::{debug, error};
 use std::{
     fmt::{Debug, Display},
     hash::Hash, ops::Range,
@@ -26,6 +27,7 @@ impl<T: Display, N: Display> Debug for Node<T, N> {
 
 // Return None if the token was used up, Some(tok) if it should still be used for a future action
 fn do_action<'a, T, N>(
+    log_options: &LoggingOptions,
     tok: T,
     slice: &str,
     slice_location: Range<usize>,
@@ -40,15 +42,19 @@ where
     T: PartialEq + Eq + Hash + Display + Debug + Logos<'a>,
     N: PartialEq + Eq + Hash + Display + Clone,
 {
-    println!(
-        "Acting on token {} in state {}/{}",
-        tok.to_string().blue(),
-        state_stack.last().unwrap(),
-        state_num
-    );
+    if log_options.print_actions {
+        debug!(
+            "Acting on token {} in state {}/{}",
+            tok.to_string().blue(),
+            state_stack.last().unwrap(),
+            state_num
+        );
+    }
     match action_opt {
         Some(Action::Reduce(n, len)) => {
-            println!("Reducing {} states to {}", len, n);
+            if log_options.print_actions {
+                debug!("Reducing {} states to {}", len, n);
+            }
             // Remove len items from the stack
             let mut children = vec![];
             for _ in 0..*len {
@@ -70,7 +76,9 @@ where
             let goto_opt = &states[state_num].goto.get(n);
             match goto_opt {
                 Some(goto) => {
-                    println!("Going to state {} after reduction", goto);
+                    if log_options.print_actions {
+                        debug!("Going to state {} after reduction", goto);
+                    }
                     state_stack.push(**goto);
                 }
                 None => {
@@ -80,24 +88,33 @@ where
                     ));
                 }
             }
-            println!("Stack: {:?}", state_stack);
+            if log_options.print_actions {
+                debug!("Stack: {:?}", state_stack);
+            }
             return Ok(Some(tok));
         }
         Some(Action::Shift(next_state)) => {
-            println!("Shifting state {} onto the stack", next_state);
+            if log_options.print_actions {
+                debug!("Shifting state {} onto the stack", next_state);
+            }
             state_stack.push(*next_state);
             let node = Node::Tm(load_data(tok, slice));
             node_stack.push(node);
-            println!("Stack: {:?}", state_stack);
+            if log_options.print_actions {
+                debug!("Stack: {:?}", state_stack);
+            }
             return Ok(None);
         }
         Some(Action::Multi(actions)) => {
-            println!(
-                "Multiple actions available for {} in state {}: {:?}. Selecting first one, {}.",
-                tok.to_string().blue(), state_num, actions, actions[0]
-            );
+            if log_options.print_actions {
+                debug!(
+                    "Multiple actions available for {} in state {}: {:?}. Selecting first one, {}.",
+                    tok.to_string().blue(), state_num, actions, actions[0]
+                );
+            }
             let action = &actions[0];
             return do_action(
+                log_options,
                 tok,
                 slice,
                 slice_location,
@@ -120,6 +137,7 @@ where
 }
 
 pub fn lr1_parse<'a, T, N>(
+    log_options: &LoggingOptions,
     states: &Vec<State<T, N>>,
     lex: &mut Lexer<'a, T>,
     eof: T,
@@ -132,6 +150,9 @@ where
 {
     let mut state_stack: Vec<usize> = vec![0];
     let mut node_stack: Vec<Node<T, N>> = vec![];
+    if log_options.print_actions {
+        debug!("{}", "Actions:".color("#ff7f00").bold());
+    }
     while state_stack.len() != 0 {
         if let Some(mut tok) = lex.next() {
             if tok == error {
@@ -142,11 +163,14 @@ where
             loop {
                 let state_num = *state_stack.last().unwrap();
                 let action_opt = &states[state_num].next.get(&tok);
-                println!(
-                    "Calling do_action({}, {:?}, stack, {}, states)",
-                    tok, action_opt, state_num
-                );
+                if log_options.print_actions {
+                    debug!(
+                        "Calling do_action({}, {:?}, stack, {}, states)",
+                        tok, action_opt, state_num
+                    );
+                }
                 if let Some(t) = do_action(
+                    log_options,
                     tok,
                     lex.slice(),
                     lex.span(),
@@ -172,11 +196,14 @@ where
         loop {
             let state_num = *state_stack.last().unwrap();
             let action_opt = &states[state_num].next.get(&tok);
-            println!(
-                "Calling do_action({}, {:?}, stack, {}, states)",
-                tok, action_opt, state_num
-            );
+            if log_options.print_actions {
+                debug!(
+                    "Calling do_action({}, {:?}, stack, {}, states)",
+                    tok, action_opt, state_num
+                );
+            }
             if let Some(t) = do_action(
+                log_options,
                 tok,
                 "$",
                 0..0,
@@ -192,13 +219,15 @@ where
                 break;
             }
         }
-        println!("Stack remaining: {:?}", state_stack);
-        println!("Accepted!");
+        if log_options.print_actions {
+            debug!("Stack remaining: {:?}", state_stack);
+            debug!("Accepted!");
+        }
         return Ok(node_stack);
     }
     // Stack ran out before EOF reached
     let remaining_tokens: Vec<T> = lex.collect();
-    print!(
+    error!(
         "Tokens remaining: {}",
         remaining_tokens
             .iter()

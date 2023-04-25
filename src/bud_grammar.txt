@@ -8,6 +8,8 @@ I (Item)                [A function, struct, import, etc.]
 F (FuncDecl)            [Function declaration]
 S (StructDecl)          [Struct declaration]
 Im (ImportDecl)         [File import]
+P (Path)                [File path literal (no quotes) - "/"-separated Files]
+Fi (File)               [id or id.id]
 As (Args)               [Zero or more comma-separated VarDecls in parentheses]
 Vsp (VarDeclsPar)       [VarDecls with parentheses]
 Vs (VarDecls)           [Comma-separated VarDecls]
@@ -87,7 +89,13 @@ I -> S
 I -> Im
 F -> V Vsp E
 S -> struct id { Vs }
-V -> Ie id
+Im -> import P
+P -> Fi
+P -> Fi / P
+P -> id :/ P
+Fi -> id
+Fi -> id . id
+V -> Te id
 
 # Lists
 Is -> I Is

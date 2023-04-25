@@ -24,6 +24,10 @@ grammar::grammar!(
         RightSquare,
         #[token(";")]
         Semicolon,
+        #[token(":")]
+        Colon,
+        #[token(".")]
+        Dot,
         #[token(",")]
         Comma,
         #[token("=")]
@@ -107,6 +111,8 @@ grammar::grammar!(
         FuncDecl,
         StructDecl,
         ImportDecl,
+        Path,
+        File,
         Args,
         VarDeclsPar,
         VarDecls,
@@ -136,13 +142,19 @@ grammar::grammar!(
     },
     get_bud_grammar: {
         // Program
-        Start   => Items;
-        Item    => FuncDecl;
-        Item    => StructDecl;
-        Item    => ImportDecl;
+        Start       => Items;
+        Item        => FuncDecl;
+        Item        => StructDecl;
+        Item        => ImportDecl;
         FuncDecl    => VarDecl, VarDeclsPar, Expr;
         StructDecl  => Struct, IdGen, LeftSquiggly, VarDecls, RightSquiggly;
-        VarDecl     => IdExpr, IdGen;
+        ImportDecl  => Import, Path;
+        Path        => File;
+        Path        => File, Div, Path;
+        Path        => IdGen, Colon, Div, Path;
+        File        => IdGen;
+        File        => IdGen, Dot, IdGen;
+        VarDecl     => TypeExpr, IdGen;
 
         // Lists
         Items   => Item, Items;
@@ -153,7 +165,7 @@ grammar::grammar!(
         Args    => LeftRound, RightRound;
         Args    => LeftRound, Exprs, RightRound;
 
-        VarDecls => VarDecl, Comma, VarDecl;
+        VarDecls => VarDecl, Comma, VarDecls;
         VarDecls => VarDecl;
         VarDeclsPar => LeftRound, RightRound;
         VarDeclsPar => LeftRound, VarDecls, RightRound;
@@ -232,7 +244,7 @@ grammar::grammar!(
         Binop       => GrtrEq;
         Binop       => Less;
         Binop       => LessEq;
-        Unop        => NotEq;
+        Unop        => Not;
         Unop        => Star;
         Unop        => Ambersand;
         Unop        => Minus;
@@ -328,51 +340,53 @@ impl std::fmt::Display for BudTerminal {
             f,
             "{}",
             match self {
-                BudTerminal::NumGen => "num".to_string(),
-                BudTerminal::StrGen => "str".to_string(),
-                BudTerminal::CharGen => "char".to_string(),
-                BudTerminal::LeftRound => "(".to_string(),
-                BudTerminal::RightRound => ")".to_string(),
-                BudTerminal::LeftSquiggly => "{".to_string(),
-                BudTerminal::RightSquiggly => "}".to_string(),
-                BudTerminal::LeftSquare => "[".to_string(),
-                BudTerminal::RightSquare => "]".to_string(),
-                BudTerminal::Semicolon => ";".to_string(),
-                BudTerminal::Comma => ",".to_string(),
-                BudTerminal::Assign => "=".to_string(),
-                BudTerminal::Num(n) => n.to_string(),
-                BudTerminal::Str(s) => s.to_string(),
-                BudTerminal::Char(c) => c.to_string(),
-                BudTerminal::Id(id) => id.to_string(),
-                BudTerminal::If => "if".to_string(),
-                BudTerminal::Unless => "unless".to_string(),
-                BudTerminal::Else => "else".to_string(),
-                BudTerminal::Import => "import".to_string(),
-                BudTerminal::Return => "return".to_string(),
-                BudTerminal::Do => "do".to_string(),
-                BudTerminal::While => "while".to_string(),
-                BudTerminal::Break => "break".to_string(),
-                BudTerminal::Continue => "continue".to_string(),
-                BudTerminal::Struct => "struct".to_string(),
-                BudTerminal::IdGen => "id".to_string(),
-                BudTerminal::Plus => "+".to_string(),
-                BudTerminal::Minus => "-".to_string(),
-                BudTerminal::Star => "*".to_string(),
-                BudTerminal::Div => "/".to_string(),
-                BudTerminal::And => "&&".to_string(),
-                BudTerminal::Or => "||".to_string(),
-                BudTerminal::Ambersand => "&".to_string(),
-                BudTerminal::BitOr => "|".to_string(),
-                BudTerminal::BitXor => "^".to_string(),
-                BudTerminal::Equal => "==".to_string(),
-                BudTerminal::NotEq => "!=".to_string(),
-                BudTerminal::Greater => ">".to_string(),
-                BudTerminal::GrtrEq => ">=".to_string(),
-                BudTerminal::Less => "<".to_string(),
-                BudTerminal::LessEq => "<=".to_string(),
-                BudTerminal::Not => "!".to_string(),
-                BudTerminal::Error => "ERROR".to_string(),
-                BudTerminal::EOF => "EOF".to_string(),
+                BudTerminal::NumGen         => "num"        .to_string(),
+                BudTerminal::StrGen         => "str"        .to_string(),
+                BudTerminal::CharGen        => "char"       .to_string(),
+                BudTerminal::LeftRound      => "("          .to_string(),
+                BudTerminal::RightRound     => ")"          .to_string(),
+                BudTerminal::LeftSquiggly   => "{"          .to_string(),
+                BudTerminal::RightSquiggly  => "}"          .to_string(),
+                BudTerminal::LeftSquare     => "["          .to_string(),
+                BudTerminal::RightSquare    => "]"          .to_string(),
+                BudTerminal::Semicolon      => ";"          .to_string(),
+                BudTerminal::Colon          => ":"          .to_string(),
+                BudTerminal::Dot            => "."          .to_string(),
+                BudTerminal::Comma          => ","          .to_string(),
+                BudTerminal::Assign         => "="          .to_string(),
+                BudTerminal::Num(n)         => n            .to_string(),
+                BudTerminal::Str(s)         => s            .to_string(),
+                BudTerminal::Char(c)        => c            .to_string(),
+                BudTerminal::Id(id)         => id           .to_string(),
+                BudTerminal::If             => "if"         .to_string(),
+                BudTerminal::Unless         => "unless"     .to_string(),
+                BudTerminal::Else           => "else"       .to_string(),
+                BudTerminal::Import         => "import"     .to_string(),
+                BudTerminal::Return         => "return"     .to_string(),
+                BudTerminal::Do             => "do"         .to_string(),
+                BudTerminal::While          => "while"      .to_string(),
+                BudTerminal::Break          => "break"      .to_string(),
+                BudTerminal::Continue       => "continue"   .to_string(),
+                BudTerminal::Struct         => "struct"     .to_string(),
+                BudTerminal::IdGen          => "id"         .to_string(),
+                BudTerminal::Plus           => "+"          .to_string(),
+                BudTerminal::Minus          => "-"          .to_string(),
+                BudTerminal::Star           => "*"          .to_string(),
+                BudTerminal::Div            => "/"          .to_string(),
+                BudTerminal::And            => "&&"         .to_string(),
+                BudTerminal::Or             => "||"         .to_string(),
+                BudTerminal::Ambersand      => "&"          .to_string(),
+                BudTerminal::BitOr          => "|"          .to_string(),
+                BudTerminal::BitXor         => "^"          .to_string(),
+                BudTerminal::Equal          => "=="         .to_string(),
+                BudTerminal::NotEq          => "!="         .to_string(),
+                BudTerminal::Greater        => ">"          .to_string(),
+                BudTerminal::GrtrEq         => ">="         .to_string(),
+                BudTerminal::Less           => "<"          .to_string(),
+                BudTerminal::LessEq         => "<="         .to_string(),
+                BudTerminal::Not            => "!"          .to_string(),
+                BudTerminal::Error          => "ERROR"      .to_string(),
+                BudTerminal::EOF            => "EOF"        .to_string(),
             }
         )
     }
@@ -384,38 +398,40 @@ impl std::fmt::Display for BudNonTerminal {
             f,
             "{}",
             match self {
-                BudNonTerminal::Start => "S'",
-                BudNonTerminal::Items => "Is",
-                BudNonTerminal::Item => "I",
-                BudNonTerminal::FuncDecl => "F",
-                BudNonTerminal::StructDecl => "S",
-                BudNonTerminal::ImportDecl => "Im",
-                BudNonTerminal::Args => "As",
-                BudNonTerminal::VarDeclsPar => "Vsp",
-                BudNonTerminal::VarDecls => "Vs",
-                BudNonTerminal::VarDecl => "V",
-                BudNonTerminal::Expr => "E",
-                BudNonTerminal::TypeExpr => "Te",
-                BudNonTerminal::Expr2 => "E2",
-                BudNonTerminal::Exprs => "Es",
-                BudNonTerminal::NonBinExpr => "Nbe",
-                BudNonTerminal::BlockExpr => "Ble",
-                BudNonTerminal::VarDeclAssgn => "Va",
-                BudNonTerminal::AssignExpr => "Ae",
-                BudNonTerminal::ReturnExpr => "Re",
-                BudNonTerminal::IdExpr => "Ie",
-                BudNonTerminal::LitExpr => "Le",
-                BudNonTerminal::ParenExpr => "Pe",
-                BudNonTerminal::UnaryExpr => "Ue",
-                BudNonTerminal::BinaryExpr => "Be",
-                BudNonTerminal::IfExpr => "If",
-                BudNonTerminal::IfElse => "Ife",
-                BudNonTerminal::UnlExpr => "Ul",
-                BudNonTerminal::UnlElse => "Ule",
-                BudNonTerminal::WhileExpr => "We",
-                BudNonTerminal::DoWhile => "Dw",
-                BudNonTerminal::Unop => "U",
-                BudNonTerminal::Binop => "B",
+                BudNonTerminal::Start           => "S'",
+                BudNonTerminal::Items           => "Is",
+                BudNonTerminal::Item            => "I",
+                BudNonTerminal::FuncDecl        => "F",
+                BudNonTerminal::StructDecl      => "S",
+                BudNonTerminal::ImportDecl      => "Im",
+                BudNonTerminal::Path            => "P",
+                BudNonTerminal::File            => "Fi",
+                BudNonTerminal::Args            => "As",
+                BudNonTerminal::VarDeclsPar     => "Vsp",
+                BudNonTerminal::VarDecls        => "Vs",
+                BudNonTerminal::VarDecl         => "V",
+                BudNonTerminal::Expr            => "E",
+                BudNonTerminal::TypeExpr        => "Te",
+                BudNonTerminal::Expr2           => "E2",
+                BudNonTerminal::Exprs           => "Es",
+                BudNonTerminal::NonBinExpr      => "Nbe",
+                BudNonTerminal::BlockExpr       => "Ble",
+                BudNonTerminal::VarDeclAssgn    => "Va",
+                BudNonTerminal::AssignExpr      => "Ae",
+                BudNonTerminal::ReturnExpr      => "Re",
+                BudNonTerminal::IdExpr          => "Ie",
+                BudNonTerminal::LitExpr         => "Le",
+                BudNonTerminal::ParenExpr       => "Pe",
+                BudNonTerminal::UnaryExpr       => "Ue",
+                BudNonTerminal::BinaryExpr      => "Be",
+                BudNonTerminal::IfExpr          => "If",
+                BudNonTerminal::IfElse          => "Ife",
+                BudNonTerminal::UnlExpr         => "Ul",
+                BudNonTerminal::UnlElse         => "Ule",
+                BudNonTerminal::WhileExpr       => "We",
+                BudNonTerminal::DoWhile         => "Dw",
+                BudNonTerminal::Unop            => "U",
+                BudNonTerminal::Binop           => "B",
             }
         )
     }

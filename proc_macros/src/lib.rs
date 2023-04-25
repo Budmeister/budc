@@ -77,7 +77,7 @@ pub fn get_ders(input: TokenStream) -> TokenStream {
     if let Some(TokenTree::Ident(l)) = iter.next() {
         lhs = l;
     } else {
-        panic!("Missing Derivation");
+        panic!("Missing LHS");
     }
     while let Some(token) = iter.next() {
         match token {
@@ -100,10 +100,10 @@ pub fn get_ders(input: TokenStream) -> TokenStream {
                     // Store and continue
                     ders.push((der, lhs));
                     der = quote!{};
-                    if let Some(TokenTree::Ident(l)) = iter.next() {
-                        lhs = l;
-                    } else {
-                        panic!("Missing Derivation");
+                    match iter.next() {
+                        Some(TokenTree::Ident(l)) => { lhs = l; }
+                        Some(token) => { panic!( "Missing Derivation, found token {}", token); }
+                        _ => { break; }
                     }
                 } else {
                     let span = punct.span().into();
@@ -128,7 +128,6 @@ pub fn get_ders(input: TokenStream) -> TokenStream {
         new_ders.push(der);
     }
     let ders = new_ders;
-    println!("ders.len(): {}", ders.len());
     let retval = quote!{
         vec![#(#ders),*]
     };

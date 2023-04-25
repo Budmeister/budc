@@ -1,5 +1,5 @@
 [package]
-name = "program-translation"
+name = "budc"
 version = "0.1.0"
 edition = "2021"
 authors = ["Brian Smith"]
@@ -10,3 +10,4 @@ authors = ["Brian Smith"]
 logos = "0"
 colored = "2"
 proc_macros = { path = "proc_macros" }
+log = "*"
