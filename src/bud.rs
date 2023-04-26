@@ -142,7 +142,7 @@ grammar::grammar!(
     },
     get_bud_grammar: {
         // Program
-        Start       => Items;
+        Start       => Items, EOF;
         Item        => FuncDecl;
         Item        => StructDecl;
         Item        => ImportDecl;
@@ -386,7 +386,7 @@ impl std::fmt::Display for BudTerminal {
                 BudTerminal::LessEq         => "<="         .to_string(),
                 BudTerminal::Not            => "!"          .to_string(),
                 BudTerminal::Error          => "ERROR"      .to_string(),
-                BudTerminal::EOF            => "EOF"        .to_string(),
+                BudTerminal::EOF            => "$"          .to_string(),
             }
         )
     }

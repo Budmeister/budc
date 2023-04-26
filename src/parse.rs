@@ -106,13 +106,42 @@ where
             return Ok(None);
         }
         Some(Action::Multi(actions)) => {
-            if log_options.print_actions {
-                debug!(
-                    "Multiple actions available for {} in state {}: {:?}. Selecting first one, {}.",
-                    tok.to_string().blue(), state_num, actions, actions[0]
-                );
+            let mut first_shift = None;
+            let mut first_reduce = None;
+            if actions.len() < 2 {
+                return Err(format!("Invalid action - Multi-action with less than two actions: {:?}, in state {}:", actions, state_num));
             }
-            let action = &actions[0];
+            for action in actions {
+                match action {
+                    Action::Shift(_) => {
+                        if let None = first_shift {
+                            first_shift = Some(action);
+                        }
+                    }
+                    Action::Reduce(_, _) => {
+                        if let None = first_reduce {
+                            first_reduce = Some(action);
+                        }
+                    }
+                    Action::Multi(_) => {
+                        return Err(format!("Invalid action - Multi-action containing multi-actions: {:?}, in state {}", actions, state_num));
+                    }
+                }
+            }
+            let action;
+            if let Some(a) = first_shift {
+                action = a;
+                debug!("Multiple actions available for {} in state {}: {:?}. Selecting the first shift action: {}",
+                    tok.to_string().blue(), state_num, actions, action
+                );
+            } else if let Some(a) = first_reduce {
+                action = a;
+                debug!("Multiple actions available for {} in state {}: {:?}. No shifts, so selecting first reduce: {}",
+                    tok.to_string().blue(), state_num, actions, action
+                );
+            } else {
+                return Err(format!("Did not find a valid action in Multi-action: {:?}", actions));
+            }
             return do_action(
                 log_options,
                 tok,
@@ -222,6 +251,7 @@ where
         if log_options.print_actions {
             debug!("Stack remaining: {:?}", state_stack);
             debug!("Accepted!");
+            debug!("End actions");
         }
         return Ok(node_stack);
     }
@@ -233,6 +263,9 @@ where
             .iter()
             .fold(String::new(), |acc, new| acc + &new.to_string())
     );
+    if log_options.print_actions {
+        debug!("End actions");
+    }
     Ok(node_stack)
 }
 

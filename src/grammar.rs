@@ -70,7 +70,7 @@ pub enum SubseqData<T, N> {
 // This will happen if the Ders are equal but the
 // DottedDers are different.
 fn is_subsequence<
-    T: Display + Clone + Eq + Hash,
+    T: Display + Clone + Eq + Hash + Ord,
     N: Display + Clone + Eq + Hash,
 >(der1: &DottedDer<T, N>, der2: &DottedDer<T, N>) -> SubseqData<T, N> {
     let n = der1.der.to.len();
@@ -121,6 +121,7 @@ impl<T, N> Grammar<T, N> {
     }
 
     // Returns an empty vector if n is in skip
+    // TODO Remove this function
     pub fn first(&mut self, n: &N, skip: Option<&HashSet<N>>) -> Vec<T>
     where
         N: Clone + PartialEq + Eq + Hash + Display,
@@ -258,8 +259,8 @@ impl<T: Eq + Hash, N> DottedDer<T, N> {
         (self.der, self.dot, self.look)
     }
 
-    // Get all derivations that we must include as a result of
-    // a nonterminal being right after the dot
+    // Get all derivations for the nonterminal right after the dot
+    // or an empty vector if the dotted symbol is terminal
     pub fn get_sub_derivations(&self, g: &Grammar<T, N>) -> Vec<DottedDer<T, N>>
     where
         N: Clone + PartialEq,
@@ -276,7 +277,7 @@ impl<T: Eq + Hash, N> DottedDer<T, N> {
         }
     }
 }
-impl<T: Display + Eq + Hash, N: Display> Display for DottedDer<T, N> {
+impl<T: Display + Eq + Hash + Ord + Clone, N: Display> Display for DottedDer<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -296,9 +297,16 @@ impl<T: Display + Eq + Hash, N: Display> Display for DottedDer<T, N> {
                     ""
                 },
             "[".to_string()
-                + &self
-                    .look
-                    .iter()
+                + &{
+                    let mut sorted = self
+                        .look
+                        .iter()
+                        .map(|t| t.clone())
+                        .collect::<Vec<T>>();
+                    sorted.sort();
+                    sorted
+                }
+                    .into_iter()
                     .enumerate()
                     .map(|(i, t)| if i == 0 { "" } else { ", " }.to_owned() + &t.to_string())
                     .fold(String::new(), |acc, new| acc + &new)
@@ -306,7 +314,7 @@ impl<T: Display + Eq + Hash, N: Display> Display for DottedDer<T, N> {
         )
     }
 }
-impl<T: Display + Eq + Hash, N: Display> Debug for DottedDer<T, N> {
+impl<T: Display + Eq + Hash + Ord + Clone, N: Display> Debug for DottedDer<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self)
     }
@@ -376,7 +384,7 @@ where
     pub next: HashMap<T, Action<N>>,
     pub goto: HashMap<N, usize>,
 }
-impl<T: Clone + Display + PartialEq + Eq + Hash, N: Clone + Display + PartialEq + Eq + Hash>
+impl<T: Clone + Display + PartialEq + Eq + Hash + Ord, N: Clone + Display + PartialEq + Eq + Hash>
     State<T, N>
 {
     // Create new state from initial derivations
@@ -413,26 +421,39 @@ impl<T: Clone + Display + PartialEq + Eq + Hash, N: Clone + Display + PartialEq 
                 }
                 Some(Symbol::NonTm(n)) => {
                     // Paste first(n) into look
-                    // println!("Getting first({}) from grammar", n);
-                    look.extend(g.first(&n, None));
+                    // println!("Getting first({}) from firsts", n);
+                    // look.extend(g.first(&n, None));
+                    match firsts.get(&n) {
+                        Some(first) => {
+                            look.extend(first
+                                .iter()
+                                .map(|t| t.clone())
+                            );
+                        }
+                        None => {
+                            error!("No firsts for NonTm, {}", n);
+                            panic!();
+                        }
+                    }
                 }
                 None => {
-                    // Dot at end; paste greater_der into looks
+                    // Dot at end; paste greater_look into looks
                     look.extend(cur_greater_look.clone());
                 }
             }
             for mut sub_der in sub_ders {
                 let mut should_revisit = true;
-                for (prev_der, _) in &mut queue {
+                for (prev_der, prev_greater_look) in &mut queue {
                     if sub_der.equals_ignore_look(prev_der) {
                         prev_der.add_looks(&look);
+                        prev_greater_look.extend(look.clone());
                         should_revisit = false;
                         break;
                     }
                 }
                 for prev_der in &mut state.ders {
                     if sub_der.equals_ignore_look(prev_der) {
-                        prev_der.add_looks(&mut look);
+                        prev_der.add_looks(&look);
                         should_revisit = false;
                         break;
                     }
@@ -442,77 +463,6 @@ impl<T: Clone + Display + PartialEq + Eq + Hash, N: Clone + Display + PartialEq 
                     queue.push((sub_der, look.clone()));
                 }
             }
-        }
-        let mut to_add = Vec::new();
-        // Check if any derivation is a subsequence of another
-        for i in 0..state.ders.len() {
-            let der1 = &state.ders[i];
-            for j in i+1..state.ders.len() {
-                let der2 = &state.ders[j];
-
-                // Check if der1 is a subsequence of der2 or vice versa
-                match is_subsequence(&der1, &der2) {
-                    SubseqData::Less(sym) => {
-                        // Add FIRST of sym to der1.look
-                        match sym {
-                            Symbol::Tm(t) => {
-                                to_add.push((i, {
-                                    let mut set = HashSet::new();
-                                    set.insert(t);
-                                    set
-                                }));
-                            }
-                            Symbol::NonTm(n) => {
-                                match firsts.get(&n) {
-                                    Some(first) => {
-                                        to_add.push((i, first
-                                            .iter()
-                                            .map(|t| t.clone())
-                                            .collect()
-                                        ));
-                                    }
-                                    None => {
-                                        error!("First set does not contain firsts for {}", n.to_string().blue());
-                                        panic!();
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    SubseqData::Greater(sym) => {
-                        match sym {
-                            Symbol::Tm(t) => {
-                                to_add.push((j, {
-                                    let mut set = HashSet::new();
-                                    set.insert(t);
-                                    set
-                                }));
-                            }
-                            Symbol::NonTm(n) => {
-                                match firsts.get(&n) {
-                                    Some(first) => {
-                                        to_add.push((j, first.clone()));
-                                    }
-                                    None => {
-                                        error!("First set does not contain firsts for {}", n.to_string().blue());
-                                        panic!();
-                                    }
-                                }
-                            }
-                        }
-
-                    }
-                    SubseqData::NotEq => {
-                        // Not a subsequence
-                    }
-                    SubseqData::Equal => {
-                        todo!()
-                    }
-                }
-            }
-        }
-        for (i, syms) in to_add {
-            state.ders[i].add_looks(&syms)
         }
         state
     }
@@ -561,7 +511,7 @@ impl<T: Clone + Display + PartialEq + Eq + Hash, N: Clone + Display + PartialEq 
         }
     }
 }
-impl<T: Display + PartialEq + Eq + Hash, N: Display + PartialEq> Display for State<T, N> {
+impl<T: Display + PartialEq + Eq + Hash + Ord + Clone, N: Display + PartialEq> Display for State<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.ders)
     }
@@ -778,8 +728,90 @@ pub fn print_firsts_as_syms<
     debug!("End firsts");
 }
 
+pub fn update_look_subseq<
+    T: Display + Clone + Eq + Hash + Ord,
+    N: Display + Clone + Eq + Hash,
+>(
+    firsts: &HashMap<N, HashSet<T>>,
+    all_similar: &mut Vec<DottedDer<T, N>>
+) {
+    let mut to_add = Vec::new();
+    // Check if any derivation is a subsequence of another
+    for i in 0..all_similar.len() {
+        let der1 = &all_similar[i];
+        for j in i+1..all_similar.len() {
+            let der2 = &all_similar[j];
+
+            // Check if der1 is a subsequence of der2 or vice versa
+            match is_subsequence(&der1, &der2) {
+                SubseqData::Less(sym) => {
+                    // Add FIRST of sym to der1.look
+                    match sym {
+                        Symbol::Tm(t) => {
+                            to_add.push((i, {
+                                let mut set = HashSet::new();
+                                set.insert(t);
+                                set
+                            }));
+                        }
+                        Symbol::NonTm(n) => {
+                            match firsts.get(&n) {
+                                Some(first) => {
+                                    to_add.push((i, first
+                                        // .iter()
+                                        // .map(|t| t.clone())
+                                        // .collect()
+                                        .clone()
+                                    ));
+                                }
+                                None => {
+                                    error!("First set does not contain firsts for {}", n.to_string().blue());
+                                    panic!();
+                                }
+                            }
+                        }
+                    }
+                }
+                SubseqData::Greater(sym) => {
+                    match sym {
+                        Symbol::Tm(t) => {
+                            to_add.push((j, {
+                                let mut set = HashSet::new();
+                                set.insert(t);
+                                set
+                            }));
+                        }
+                        Symbol::NonTm(n) => {
+                            match firsts.get(&n) {
+                                Some(first) => {
+                                    to_add.push((j, first.clone()));
+                                }
+                                None => {
+                                    error!("First set does not contain firsts for {}", n.to_string().blue());
+                                    panic!();
+                                }
+                            }
+                        }
+                    }
+
+                }
+                SubseqData::NotEq => {
+                    // Not a subsequence
+                }
+                SubseqData::Equal => {
+                    // todo!()
+                }
+            }
+        }
+    }
+    for (i, syms) in to_add {
+        all_similar[i].add_looks(&syms)
+    }
+    
+}
+
 pub fn lr1_generate<
-    T: PartialEq + Eq + Clone + Display + Hash,
+    T: PartialEq + Eq + Clone + Display + Hash + Ord,
     N: PartialEq + Eq + Clone + Display + Hash,
 >(
     log_options: &LoggingOptions,
@@ -846,13 +878,15 @@ pub fn lr1_generate<
                 queue.retain(|der| der.dotted_sym() != Some(sym));
                 all_similar.push(cloned_der);
                 // println!("All similar derivations: {:?}", all_similar);
-
-                let new_state = State::new(
+                
+                update_look_subseq(&firsts, &mut all_similar);
+                let mut new_state = State::new(
                     all_similar.into_iter().map(|der| der.advance()).collect(),
                     &look,
                     g,
                     &firsts
                 );
+                update_look_subseq(&firsts, &mut new_state.ders);
                 states_to_add.push((new_state, der.to.into_iter().nth(dot).unwrap()));
             };
         }
@@ -936,7 +970,7 @@ macro_rules! grammar {
             $($lhs:ident => $($rhs:tt),+);+ $(;)?
         }
     ) => {
-        #[derive(logos::Logos, ::std::fmt::Debug, ::std::cmp::PartialEq, ::std::cmp::Eq, ::std::clone::Clone, ::std::hash::Hash)]
+        #[derive(logos::Logos, ::std::fmt::Debug, ::std::cmp::PartialEq, ::std::cmp::Eq, ::std::clone::Clone, ::std::hash::Hash, ::std::cmp::Ord, ::std::cmp::PartialOrd)]
         pub enum $term_name {
             $( $(#[$meta])* $terminal $(($($term_param),*))?),+,
         }

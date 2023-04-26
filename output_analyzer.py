@@ -1,8 +1,11 @@
 
 # import pip
 # pip.main(["install", "colorama"])
+# pip.main(["install", "chardet"])
 
 from colorama import Fore, Back, Style
+import chardet
+import re
 
 def yellow(string):
     return Fore.YELLOW + str(string) + Style.RESET_ALL
@@ -24,6 +27,7 @@ info = []
 warn = []
 error = []
 other = []
+all_lines = []
 usage = None
 logging_level = None
 logging_options = None
@@ -145,6 +149,28 @@ def read_state_transitions(lines, index):
         print(red("Did not find state transitions"))
     return index
 
+def read_one_state(words):
+    try:
+        next_arrow = words.index("->")
+    except ValueError:
+        next_arrow = -1
+    state = []  # state = [(der, look), ...]
+    while 1:
+        arrow = next_arrow
+        if arrow == -1:
+            break
+        try:
+            next_arrow = words.index("->", arrow+1)
+        except ValueError:
+            next_arrow = -1
+        der = words[arrow-1] + " -> " + words[arrow+1][:-1] # last character in "to" should be comma
+        if next_arrow != -1:
+            look = " ".join(words[arrow+2:next_arrow-1])[:-1]
+        else:
+            look = " ".join(words[arrow+2:])
+        state.append((der, look))
+    return state
+
 def read_states(lines, index):
     if index >= len(lines):
         return index
@@ -159,25 +185,7 @@ def read_states(lines, index):
             _, line = lines[index].split(": [")
             line = line[:-1]
             words = line.split()
-            try:
-                next_arrow = words.index("->")
-            except ValueError:
-                next_arrow = -1
-            state = []  # state = [(der, look), ...]
-            while 1:
-                arrow = next_arrow
-                if arrow == -1:
-                    break
-                try:
-                    next_arrow = words.index("->", arrow+1)
-                except ValueError:
-                    next_arrow = -1
-                der = words[arrow-1] + " -> " + words[arrow+1][:-1] # last character in "to" should be comma
-                if next_arrow != -1:
-                    look = " ".join(words[arrow+2:next_arrow-1])[:-1]
-                else:
-                    look = " ".join(words[arrow+2:])
-                state.append((der, look))
+            state = read_one_state(words)
             states.append(state)
 
             index += 1
@@ -196,7 +204,8 @@ def read_action_table(lines, index):
         index += 1
         if index >= len(lines):
             return index
-        symbols = lines[index].split("\t")[1:]
+        # symbols = lines[index].split("\t")[1:]
+        symbols = lines[index].split("\t")
         index += 1
         if index >= len(lines):
             return index
@@ -259,12 +268,20 @@ def read_syntax_tree(lines, index):
                 return index
         index += 1
     else:
-        print(green("Did not find syntax tree"))
+        print(red("Did not find syntax tree"))
     return index
 
+def chardetect(dir):
+    with open(dir, "rb") as file:
+        rawdata = file.read(100000)
+        result = chardet.detect(rawdata)
+        encoding = result["encoding"]
+    return encoding
+
 def read_output(dir):
-    with open(dir, "r") as file:
-        lines = file.readlines()
+    global all_lines
+    with open(dir, "r", encoding=chardetect(dir)) as file:
+        all_lines = file.readlines()
     logs = [
         ("TRACE", trace),
         ("DEBUG", debug),
@@ -273,12 +290,12 @@ def read_output(dir):
         ("ERROR", error),
     ]
     to_read = []
-    for line in lines:
-        line = line.strip()
+    for line in all_lines:
+        line = line.rstrip()
         for log_name, log in logs:
             if line.startswith(log_name + " - "):
                 log.append(line)
-                if log is not error and log is not warn:
+                if log is not error and log is not warn and log is not trace:
                     to_read.append(line[len(log_name + " - "):])
                 break
         else:
@@ -356,15 +373,26 @@ def print_firsts(*args):
     else:
         print(yellow("No firsts found"))
 
-def print_state_pretty(state_num):
-    if state_num >= len(states):
-        print(yellow(f"State num too big: {state_num}"))
-    else:
-        state = states[state_num]
-        print(red(f"State {state_num}"))
-        for der, look in state:
-            print(f"\tder: {pad_back(blue(der), 50)}, lookahead: {look[1:-1]}")
-        print()
+def print_state_string(*args):
+    args = list(args)
+    if args[0][0] == '[' and args[-1][-1] == ']':
+        args[0] = args[0][1:]
+        args[-1] = args[-1][:-1]
+    state = read_one_state(args)
+    print_state_pretty(state)
+
+def print_state_pretty(state):
+    if isinstance(state, int):
+        if state >= len(states):
+            print(yellow(f"State num too big: {state}"))
+        else:
+            print(red(f"State {state}"))
+            state = states[state]
+    elif isinstance(state, str):
+        pass
+    for der, look in state:
+        print(f"\tder: {pad_back(blue(der), 50)}, lookahead: {look[1:-1]}")
+    print()
 
 def print_state(*args):
     if states is not None:
@@ -444,6 +472,19 @@ def print_help(*args):
     for command in commands:
         print(f"\t{pad_back(command, length)} - {commands[command][1]}")
 
+def regex(*args):
+    pattern = " ".join(args)
+    matches = [line for line in all_lines if re.search(pattern, line)]
+    if len(matches) == 0:
+        print(f"No matches found for regex: '{pattern}'")
+    [print(x.strip()) for x in matches]
+
+def print_syntax_tree(*args):
+    if syntax_tree is None:
+        print(yellow("No syntax tree found"))
+        return
+    [print(x) for x in syntax_tree]
+
 commands = {
     "trace":            (lambda *args: print_log("trace"),      "Print trace log messages"),
     "debug":            (lambda *args: print_log("debug"),      "Print debug log messages"),
@@ -456,15 +497,20 @@ commands = {
     "ders":             (print_ders,                            "Print all derivations for the given symbol(s)"),
     "first":            (print_firsts,                          "Print the first set for the given symbol(s)"),
     "state":            (print_state,                           "Pretty print the given state(s)"),
+    "pretty":           (print_state_string,                    "Pretty print the given state string"),
     "action":           (get_action,                            "Print the action for the given state and symbol OR all actions for a state"),
     "actions":          (print_actions,                         "Print the actions taken in parsing"),
     "stack":            (print_stack,                           "Print the final stack of the parser"),
     "stackstates":      (print_stack_states,                    "Pretty print all the states on the stack"),
+    "regex":            (regex,                                 "Find lines that match the given regular expression"),
+    "tree":             (print_syntax_tree,                     "Print the produced syntax tree - Can be large"),
     "exit":             (lambda *args: exit(),                  "Quit the analyzer"),
     "help":             (print_help,                            "Print this help message"),
 }
 
 def execute(command):
+    if len(command) == 0:
+        return
     command, *args = command.split()
     if command not in commands:
         print(f"Unknown command: {command}")
