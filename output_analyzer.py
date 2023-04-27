@@ -309,8 +309,12 @@ def read_output(dir):
     actions = None
     stack = None
     syntax_tree = None
-    with open(dir, "r", encoding=chardetect(dir)) as file:
-        all_lines = file.readlines()
+    try:
+        with open(dir, "r", encoding=chardetect(dir)) as file:
+            all_lines = file.readlines()
+    except OSError:
+        print(f"Unable to read file {output_dir}. Maybe you need to run budc with the `run` command?")
+        return
     logs = [
         ("TRACE", trace),
         ("DEBUG", debug),

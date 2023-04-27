@@ -375,8 +375,6 @@ where
     }
 }
 
-// pub type State<T, N> = Vec<DottedDer<T, N>>;
-// #[derive(PartialEq)]
 pub struct State<T, N>
 where
     T: PartialEq + Eq + Hash,
@@ -419,18 +417,16 @@ impl<T: Clone + Display + PartialEq + Eq + Hash + Ord, N: Clone + Display + Part
         // Keep filling state.ders with sub-derivations until there are no more
         // Potential infinite loop here
         while let Some((cur_der, cur_greater_look)) = queue.pop() {
-            // println!("State ders: {:?}, cur_der: {}, queue: {:?}", state.ders, cur_der, queue);
             let mut sub_der_indices = vec![state_ders.len()];
             let sub_ders = cur_der.get_sub_derivations(g);
             let mut look = HashSet::new();
+            // Add to greater_look depending on the location of the dot
             match cur_der.next_dotted_sym() {
                 Some(Symbol::Tm(t)) => {
                     look.insert(t.clone());
                 }
                 Some(Symbol::NonTm(n)) => {
                     // Paste first(n) into look
-                    // println!("Getting first({}) from firsts", n);
-                    // look.extend(g.first(&n, None));
                     match firsts.get(&n) {
                         Some(first) => {
                             look.extend(first
@@ -453,6 +449,7 @@ impl<T: Clone + Display + PartialEq + Eq + Hash + Ord, N: Clone + Display + Part
 
                 }
             }
+            // Check if the der has already been processed
             for mut sub_der in sub_ders {
                 let mut should_revisit = true;
                 for (prev_der, prev_greater_look) in &mut queue {
@@ -481,7 +478,17 @@ impl<T: Clone + Display + PartialEq + Eq + Hash + Ord, N: Clone + Display + Part
                         break;
                     }
                 }
-                if should_print {
+                to_add.retain(|index| *index < state_ders.len());
+                let mut i = 0;
+                while i < to_add.len() {
+                    for index in &state_ders[to_add[i]].1 {
+                        if *index < state_ders.len() && !to_add.contains(index) {
+                            to_add.push(*index);
+                        }
+                    }
+                    i += 1;
+                }
+                if should_print && to_add.len() > 0 {
                     trace!("Adding looks, {}, to previous ders, ", look.to_string());
                 }
                 for prev_sub_der_index in to_add {
