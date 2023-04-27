@@ -452,6 +452,8 @@ impl<T: Clone + Display + PartialEq + Eq + Hash + Ord, N: Clone + Display + Part
             // Check if the der has already been processed
             for mut sub_der in sub_ders {
                 let mut should_revisit = true;
+                // If a child is also in the queue, then add the looks from the child to the copy that is in the queue
+                // Ders in the queue do not have children yet, so there is no need to search the tree of children
                 for (prev_der, prev_greater_look) in &mut queue {
                     if sub_der.equals_ignore_look(prev_der) {
                         if should_print {
@@ -463,6 +465,10 @@ impl<T: Clone + Display + PartialEq + Eq + Hash + Ord, N: Clone + Display + Part
                         break;
                     }
                 }
+                // If a child is also already processed (in state_ders), then add the looks from the child to 
+                // those of the copy in state_ders and all its sub_ders and sub_sub_ders, etc.
+                // If a descendant in the queue (not in state_ders), add looks to the descendant in the queue
+                // and its greater look set, but it doesn't have children yet
                 let mut to_add = Vec::new();
                 for (prev_der, prev_sub_der_indices) in &mut state_ders {
                     if sub_der.equals_ignore_look(prev_der) {
@@ -478,18 +484,24 @@ impl<T: Clone + Display + PartialEq + Eq + Hash + Ord, N: Clone + Display + Part
                         break;
                     }
                 }
-                to_add.retain(|index| *index < state_ders.len());
+                // Recursively add children of elements in to_add to to_add
                 let mut i = 0;
                 while i < to_add.len() {
-                    for index in &state_ders[to_add[i]].1 {
-                        if *index < state_ders.len() && !to_add.contains(index) {
-                            to_add.push(*index);
+                    if to_add[i] < state_ders.len() {
+                        for index in &state_ders[to_add[i]].1 {
+                            if !to_add.contains(index) {
+                                to_add.push(*index);
+                            }
                         }
                     }
                     i += 1;
                 }
                 if should_print && to_add.len() > 0 {
-                    trace!("Adding looks, {}, to previous ders, ", look.to_string());
+                    trace!("Adding looks, {}, to previous ders at {:?}; state_ders.len(): {}", look.to_string(), to_add, state_ders.len());
+                    trace!("\tstate_ders:");
+                    for prev in &state_ders {
+                        trace!("\t\t{:?}", prev);
+                    }
                 }
                 for prev_sub_der_index in to_add {
                     if prev_sub_der_index < state_ders.len() {
@@ -497,6 +509,16 @@ impl<T: Clone + Display + PartialEq + Eq + Hash + Ord, N: Clone + Display + Part
                             trace!("\t{:?}", state_ders[prev_sub_der_index]);
                         }
                         state_ders[prev_sub_der_index].0.add_looks(&look);
+                    } else if prev_sub_der_index - state_ders.len() < queue.len() {
+                        if should_print {
+                            trace!("\t({}, {})", queue[prev_sub_der_index - state_ders.len()].0, queue[prev_sub_der_index - state_ders.len()].1.to_string());
+                        }
+                        let (prev_der, prev_greater_look) = &mut queue[prev_sub_der_index - state_ders.len()];
+                        prev_der.add_looks(&look);
+                        prev_greater_look.extend(look.clone());
+                    } else {
+                        error!("Child index {} out of bounds for state_ders len {} and queue len {}", prev_sub_der_index, state_ders.len(), queue.len());
+                        panic!();
                     }
                 }
                 if should_revisit {
