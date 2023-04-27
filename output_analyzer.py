@@ -6,6 +6,7 @@
 from colorama import Fore, Back, Style
 import chardet
 import re
+import os
 
 def yellow(string):
     return Fore.YELLOW + str(string) + Style.RESET_ALL
@@ -50,6 +51,7 @@ def read_usage(lines, index):
 
 def read_logging_level(lines, index):
     if index >= len(lines):
+        print(red("Did not find logging level"))
         return index
     global logging_level
     if lines[index].startswith("Logging level of "):
@@ -66,6 +68,7 @@ def read_logging_level(lines, index):
 
 def read_logging_options(lines, index):
     if index >= len(lines):
+        print(red("Did not find logging options"))
         return index
     words = lines[index].split()
     if words[0] == "LoggingOptions":
@@ -87,9 +90,10 @@ def read_logging_options(lines, index):
     return index
 
 def read_grammar(lines, index):
-    if index >= len(lines):
+    if index >= len(lines) or lines[index] != "Grammar:":
+        print(red("Did not find grammar"))
         return index
-    if lines[index] == "Grammar:":
+    else:
         print(green("Found grammar"))
         index += 1
         if index >= len(lines):
@@ -106,14 +110,13 @@ def read_grammar(lines, index):
             if index >= len(lines):
                 return index
         index += 1
-    else:
-        print(red("Did not find grammar"))
-    return index
+        return index
 
 def read_firsts(lines, index):
-    if index >= len(lines):
+    if index >= len(lines) or lines[index] != "Firsts:":
+        print(red("Did not find firsts"))
         return index
-    if lines[index] == "Firsts:":
+    else:
         print(green("Found firsts"))
         index += 1
         if index >= len(lines):
@@ -127,14 +130,13 @@ def read_firsts(lines, index):
             if index >= len(lines):
                 return index
         index += 1
-    else:
-        print(red("Did not find firsts"))
-    return index
+        return index
 
 def read_state_transitions(lines, index):
-    if index >= len(lines):
+    if index >= len(lines) or lines[index] != "State Transitions:":
+        print(red("Did not find state transitions"))
         return index
-    if lines[index] == "State Transitions:":
+    else:
         print(green("Found state transitions"))
         index += 1
         if index >= len(lines):
@@ -145,9 +147,7 @@ def read_state_transitions(lines, index):
             if index >= len(lines):
                 return index
         index += 1
-    else:
-        print(red("Did not find state transitions"))
-    return index
+        return index
 
 def read_one_state(words):
     try:
@@ -172,9 +172,10 @@ def read_one_state(words):
     return state
 
 def read_states(lines, index):
-    if index >= len(lines):
+    if index >= len(lines) or lines[index] != "States:":
+        print(red("Did not find states"))
         return index
-    if lines[index] == "States:":
+    else:
         print(green("Found states"))
         index += 1
         if index >= len(lines):
@@ -192,14 +193,13 @@ def read_states(lines, index):
             if index >= len(lines):
                 return index
         index += 1
-    else:
-        print(red("Did not find states"))
-    return index
+        return index
 
 def read_action_table(lines, index):
-    if index >= len(lines):
+    if index >= len(lines) or lines[index] != "Action Table:":
+        print(red("Did not find action table"))
         return index
-    if lines[index] == "Action Table:":
+    else:
         print(green("Found action table"))
         index += 1
         if index >= len(lines):
@@ -219,14 +219,13 @@ def read_action_table(lines, index):
             if index >= len(lines):
                 return index
         index += 1
-    else:
-        print(red("Did not find action table"))
-    return index
+        return index
 
 def read_actions(lines, index):
-    if index >= len(lines):
+    if index >= len(lines) or lines[index] != "Actions:":
+        print(red("Did not find actions"))
         return index
-    if lines[index] == "Actions:":
+    else:
         print(green("Found actions"))
         index += 1
         if index >= len(lines):
@@ -247,14 +246,13 @@ def read_actions(lines, index):
             if index >= len(lines):
                 return index
         index += 1
-    else:
-        print(red("Did not find actions"))
-    return index
+        return index
 
 def read_syntax_tree(lines, index):
-    if index >= len(lines):
+    if index >= len(lines) or lines[index] != "Syntax Tree":
+        print(red("Did not find syntax tree"))
         return index
-    if lines[index] == "Syntax Tree:":
+    else:
         print(green("Found syntax tree"))
         index += 1
         if index >= len(lines):
@@ -267,9 +265,7 @@ def read_syntax_tree(lines, index):
             if index >= len(lines):
                 return index
         index += 1
-    else:
-        print(red("Did not find syntax tree"))
-    return index
+        return index
 
 def chardetect(dir):
     with open(dir, "rb") as file:
@@ -279,7 +275,40 @@ def chardetect(dir):
     return encoding
 
 def read_output(dir):
+    global trace
+    global debug
+    global info
+    global warn
+    global error
+    global other
     global all_lines
+    global usage
+    global logging_level
+    global logging_options
+    global grammar
+    global firsts
+    global states
+    global action_table
+    global actions
+    global stack
+    global syntax_tree
+    trace = []
+    debug = []
+    info = []
+    warn = []
+    error = []
+    other = []
+    all_lines = []
+    usage = None
+    logging_level = None
+    logging_options = None
+    grammar = None
+    firsts = None
+    states = None
+    action_table = None
+    actions = None
+    stack = None
+    syntax_tree = None
     with open(dir, "r", encoding=chardetect(dir)) as file:
         all_lines = file.readlines()
     logs = [
@@ -339,7 +368,7 @@ def print_logging_options(*args):
     if logging_options is not None:
         print("{")
         for k, v in logging_options.items():
-            print(f"\t\"{k}\": {v}")
+            print(f"\t\"{k}\": {v},")
         print("}")
     else:
         print(yellow("No logging options found"))
@@ -485,7 +514,53 @@ def print_syntax_tree(*args):
         return
     [print(x) for x in syntax_tree]
 
+def create_log_options():
+    return {
+        "print_log_options": True,
+        "print_grammar": True,
+        "print_firsts": True,
+        "print_firsts_actions": True,
+        "print_state_transitions": True,
+        "print_states": True,
+        "print_action_table": True,
+        "print_actions": True,
+        "print_syntax_tree": True,
+    }
+
+log_levels = {
+    "trace",
+    "debug",
+    "info",
+    "warn",
+    "error",
+    "off"
+}
+
+def run(*args):
+    log_level = "trace"    
+    options = create_log_options()
+    command = "cargo run -- src/test.bud"
+    for arg in args:
+        if arg in log_levels:
+            log_level = arg
+            continue
+        if arg.startswith("!"):
+            options[arg[1:]] = False
+        else:
+            options[arg] = True
+    for option in options:
+        if options[option]:
+            command += " " + option
+        else:
+            command += " !" + option
+    command += " " + log_level
+    command += " > " + output_dir
+    print(command)
+    os.system(command)
+    read_output(output_dir)
+
 commands = {
+    "run":              (run,                                   "Run cargo and re-analyze ouptut"),
     "trace":            (lambda *args: print_log("trace"),      "Print trace log messages"),
     "debug":            (lambda *args: print_log("debug"),      "Print debug log messages"),
     "info":             (lambda *args: print_log("info"),       "Print info log messages"),

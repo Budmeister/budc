@@ -20,9 +20,9 @@ E2 (Expr2)              [One or more expressions in a row--for statement express
 Es (Exprs)              [One or more comma-separated expressions]
 Nbe (NonBinExpr)        [An expression that is not a binary expression]
 Ble (BlockExpr)         [An Expr2 in squiggly brackets]
-Ae (AssignExpr)         [IdExpr = Expr]
-Va (VarDeclAssgn)       [Variable declaration and assignment]
-Re (ReturnExpression)   [Return statement]
+Ae (AssignExpr)         [IdExpr = Expr -                        statement = ends in ;]
+Va (VarDeclAssgn)       [Variable declaration and assignment -  statement = ends in ;]
+Re (ReturnExpression)   [Return statement -                     statement = ends in ;]
 Ie (IdExpr)             [Expression that can be assigned as if it is an id]
 Le (LitExpr)            [Literal expression, int, string, char]
 Pe (ParenExpr)          [Parenthetical Expression]
@@ -119,7 +119,7 @@ E2 -> E         # checker (and it should be allowed, since statements are
 
 # Expressions
 E -> Be         # Since NonBinExpr work as BinaryExpr
-E -> E;
+#E -> E;
 
 Nbe -> Ble
 Nbe -> Ae
@@ -141,10 +141,10 @@ Te -> Te[num]
 Te -> *(Te)
 
 Ble -> { E2 }
-Ae -> Ie = E
-Va -> V = E
-Re -> return
-Re -> return Expr
+Ae -> Ie = E;
+Va -> V = E;
+Re -> return;
+Re -> return Expr;
 Ie -> E[E]      # If this is illegal, it will be caught by the expander.
 Ie -> E(Es)     # Parenthetical indexing causes bounds checking at runtime.
 Ie -> id

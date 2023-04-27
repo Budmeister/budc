@@ -10,6 +10,7 @@ pub mod slp;
 pub mod slp_symbols;
 use logos::Logos;
 
+pub mod tools;
 pub mod logging;
 use logging::SimpleLogger;
 use log::{error, debug};
