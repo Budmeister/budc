@@ -249,7 +249,7 @@ def read_actions(lines, index):
         return index
 
 def read_syntax_tree(lines, index):
-    if index >= len(lines) or lines[index] != "Syntax Tree":
+    if index >= len(lines) or lines[index] != "Syntax Tree:":
         print(red("Did not find syntax tree"))
         return index
     else:
@@ -347,7 +347,13 @@ def read_output(dir):
     index = read_actions(to_read, index)
     index = read_syntax_tree(to_read, index)
 
-def print_log(type):
+def read(*args):
+    if len(args) > 0:
+        global output_dir
+        output_dir = args[0]
+    read_output(output_dir)
+
+def print_log(type, *args):
     logs = {
         "trace": trace,
         "debug": debug,
@@ -357,7 +363,17 @@ def print_log(type):
         "other": other,
     }
     if type in logs:
-        if len(logs[type]) < 500 or input(f"There are {len(logs[type])} {type} logs. Still print? (y/n) ") in ("Y", "y"):
+        if len(args) > 0:
+            try:
+                limit = int(args[0])
+            except:
+                print(f"Invalid number: {args[0]}:")
+                return
+            if limit > 0:
+                [print(x) for x in logs[type][:limit]]
+            else:
+                [print(x) for x in logs[type][limit:]]
+        elif len(logs[type]) < 500 or input(f"There are {len(logs[type])} {type} logs. Still print? (y/n) ") in ("Y", "y"):
             [print(x) for x in logs[type]]
     else:
         print(f"Unknown log type: {red(type)}")
@@ -564,27 +580,28 @@ def run(*args):
     read_output(output_dir)
 
 commands = {
-    "run":              (run,                                   "Run cargo and re-analyze ouptut"),
-    "trace":            (lambda *args: print_log("trace"),      "Print trace log messages"),
-    "debug":            (lambda *args: print_log("debug"),      "Print debug log messages"),
-    "info":             (lambda *args: print_log("info"),       "Print info log messages"),
-    "warn":             (lambda *args: print_log("warn"),       "Print warn log messages"),
-    "error":            (lambda *args: print_log("error"),      "Print error log messages"),
-    "other":            (lambda *args: print_log("other"),      "Print other log messages"),
-    "llevel":           (print_logging_level,                   "Print the logging level"),
-    "loptions":         (print_logging_options,                 "Print logging options"),
-    "ders":             (print_ders,                            "Print all derivations for the given symbol(s)"),
-    "first":            (print_firsts,                          "Print the first set for the given symbol(s)"),
-    "state":            (print_state,                           "Pretty print the given state(s)"),
-    "pretty":           (print_state_string,                    "Pretty print the given state string"),
-    "action":           (get_action,                            "Print the action for the given state and symbol OR all actions for a state"),
-    "actions":          (print_actions,                         "Print the actions taken in parsing"),
-    "stack":            (print_stack,                           "Print the final stack of the parser"),
-    "stackstates":      (print_stack_states,                    "Pretty print all the states on the stack"),
-    "regex":            (regex,                                 "Find lines that match the given regular expression"),
-    "tree":             (print_syntax_tree,                     "Print the produced syntax tree - Can be large"),
-    "exit":             (lambda *args: exit(),                  "Quit the analyzer"),
-    "help":             (print_help,                            "Print this help message"),
+    "run":              (run,                                       "Run cargo and re-analyze ouptut"),
+    "read":             (read,                                      "Re-analyze output"),
+    "trace":            (lambda *args: print_log("trace", *args),   "Print trace log messages"),
+    "debug":            (lambda *args: print_log("debug", *args),   "Print debug log messages"),
+    "info":             (lambda *args: print_log("info", *args),    "Print info log messages"),
+    "warn":             (lambda *args: print_log("warn", *args),    "Print warn log messages"),
+    "error":            (lambda *args: print_log("error", *args),   "Print error log messages"),
+    "other":            (lambda *args: print_log("other", *args),   "Print other log messages"),
+    "llevel":           (print_logging_level,                       "Print the logging level"),
+    "loptions":         (print_logging_options,                     "Print logging options"),
+    "ders":             (print_ders,                                "Print all derivations for the given symbol(s)"),
+    "first":            (print_firsts,                              "Print the first set for the given symbol(s)"),
+    "state":            (print_state,                               "Pretty print the given state(s)"),
+    "pretty":           (print_state_string,                        "Pretty print the given state string"),
+    "action":           (get_action,                                "Print the action for the given state and symbol OR all actions for a state"),
+    "actions":          (print_actions,                             "Print the actions taken in parsing"),
+    "stack":            (print_stack,                               "Print the final stack of the parser"),
+    "stackstates":      (print_stack_states,                        "Pretty print all the states on the stack"),
+    "regex":            (regex,                                     "Find lines that match the given regular expression"),
+    "tree":             (print_syntax_tree,                         "Print the produced syntax tree - Can be large"),
+    "exit":             (lambda *args: exit(),                      "Quit the analyzer"),
+    "help":             (print_help,                                "Print this help message"),
 }
 
 def execute(command):

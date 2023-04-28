@@ -1,6 +1,27 @@
 
+import file
+
+int fun() {
+    return 0;
+}
+
+struct my_struct {
+    int hello
+}
 
 type main() {
     int a = 1;
+    int b = fun();
+    
+    int c = a + b;
+    printf("%d", c);
+
+    if c < 10 {
+        printf("c is small");
+    }
+    unless c < 10 {
+        printf("c is large");
+    }
+
     return 0;
 }

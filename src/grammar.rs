@@ -4,12 +4,9 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::hash::Hash;
 
-use log::{warn, debug, error, trace};
+use log::{warn, debug, error};
 
 use colored::Colorize;
-use crate::tools;
-use crate::tools::ToStringCollection;
-
 pub enum Option2<T, U> {
     Some1(T),
     Some2(U),
@@ -223,14 +220,19 @@ impl<T: Eq + Hash, N> DottedDer<T, N> {
         advanced
     }
 
-    pub fn add_looks(&mut self, other_looks: &HashSet<T>)
+    pub fn add_looks(&mut self, other_looks: &HashSet<T>) -> bool
     where
         T: Clone,
     {
+        let mut added = false;
         let mut iter = other_looks.iter();
         while let Some(t) = iter.next() {
-            self.look.insert(t.clone());
+            if !self.look.contains(t) {
+                self.look.insert(t.clone());
+                added = true;
+            }
         }
+        added
     }
 
     pub fn dotted_sym(&self) -> Option<&Symbol<T, N>> {
@@ -375,6 +377,12 @@ where
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+enum ChildGraphIndex {
+    GraphInd(usize),
+    StackInd(usize),
+}
+
 pub struct State<T, N>
 where
     T: PartialEq + Eq + Hash,
@@ -387,10 +395,146 @@ where
 impl<T: Clone + Display + PartialEq + Eq + Hash + Ord, N: Clone + Display + PartialEq + Eq + Hash>
     State<T, N>
 {
-    // Create new state from initial derivations
-    // Automatically include sub-derivations
+    
+    // Recursively replace all ChildGraphIndex::StackInd(from) in state_ders with ChildGraphIndex::GraphInd(to)
+    // starting with the children at state_ders[to]
+    fn replace_stack_ptr(from: usize, to: usize, state_ders: &mut Vec<(DottedDer<T, N>, Vec<ChildGraphIndex>)>) {
+        if to >= state_ders.len() {
+            error!("Tried to replace stack pointers starting at index {}, but there are only {} ders", to, state_ders.len());
+            panic!();
+        }
+        // Don't actually use recursion, but use a queue with a checked set
+        let mut checked = HashSet::new();
+        let mut queue = vec![to];
+        let mut i = 0;
+        while i < queue.len() {
+            if !checked.contains(&queue[i]) {
+                let g_ind = queue[i];
+                state_ders[g_ind].1 = state_ders[g_ind].1
+                    .iter()
+                    .map(|cgi| {
+                        match cgi {
+                            ChildGraphIndex::GraphInd(g_ind2) => {
+                                queue.push(*g_ind2);
+                                *cgi
+                            },
+                            ChildGraphIndex::StackInd(s_ind) => {
+                                if *s_ind == from {
+                                    ChildGraphIndex::GraphInd(to)
+                                } else {
+                                    *cgi
+                                }
+                            },
+                        }
+                    })
+                    .collect();
+                checked.insert(queue[i]);
+            }
+            i += 1;
+        }
+    }
+
+    fn update_child_graph(der: &DottedDer<T, N>, state_ders: &mut Vec<(DottedDer<T, N>, Vec<ChildGraphIndex>)>, stack: &mut Vec<DottedDer<T, N>>, g: &Grammar<T, N>, should_print: bool) -> ChildGraphIndex {
+        match state_ders
+            .iter()
+            .position(|(prev_der, _)| prev_der == der) {
+                Some(g_ind) => {
+                    return ChildGraphIndex::GraphInd(g_ind);
+                },
+                None => {},
+            }
+        match stack
+            .iter()
+            .position(|prev_der| der == prev_der) {
+                Some(s_ind) => {
+                    return ChildGraphIndex::StackInd(s_ind);
+                },
+                None => {},
+            }
+        stack.push(der.clone());
+        let sub_ders = der.get_sub_derivations(g);
+        let sub_der_indices = sub_ders
+            .iter()
+            .map(|sub_der|
+                Self::update_child_graph(sub_der, state_ders, stack, g, should_print)
+            )
+            .collect();
+        stack.pop();
+        state_ders.push((der.clone(), sub_der_indices));
+        Self::replace_stack_ptr(stack.len(), state_ders.len() - 1, state_ders);
+        ChildGraphIndex::GraphInd(state_ders.len() - 1)
+    }
+
+    fn get_sub_der_graph(starting_syms: &Vec<DottedDer<T, N>>, g: &Grammar<T, N>, should_print: bool) -> Vec<(DottedDer<T, N>, Vec<ChildGraphIndex>)> {
+        // Assume that none of the starting_syms are children of each other
+        let mut state_ders = Vec::new();
+        for der in starting_syms {
+            Self::update_child_graph(der, &mut state_ders, &mut Vec::new(), g, should_print);
+        }
+
+        state_ders
+    }
+
+    // Add looks to children if children's dots are at the end
+    // Repeat until all children have correct looks
+    fn add_looks(state_ders: &mut Vec<(DottedDer<T, N>, Vec<usize>)>, firsts: &HashMap<N, HashSet<T>>) {
+
+        // Continue pushing looks to children with dots at end until
+        // there are no changes
+        let mut change = true;
+        while change {
+            change = false;
+            let mut syms_to_add = Vec::new();
+            let mut looks_to_add = Vec::new();
+            for (index, (_, sub_der_indices)) in state_ders.iter().enumerate() {
+                for sub_der_index in sub_der_indices {
+                    if *sub_der_index >= state_ders.len() {
+                        error!("sub_der_index {} too big for state_ders.len() {}", sub_der_index, state_ders.len());
+                        panic!();
+                    }
+                    match state_ders[index].0.next_dotted_sym() {
+                        Some(Symbol::Tm(t)) => {
+                            syms_to_add.push((*sub_der_index, {
+                                let mut set = HashSet::new();
+                                set.insert(t.clone());
+                                set
+                            }));
+                        }
+                        Some(Symbol::NonTm(n)) => {
+                            // Paste first(n) into look
+                            match firsts.get(&n) {
+                                Some(first) => {
+                                    syms_to_add.push((*sub_der_index, first.clone()))
+                                }
+                                None => {
+                                    error!("No firsts for NonTM, {}", n);
+                                    panic!();
+                                }
+                            }
+                        }
+                        None => {
+                            looks_to_add.push((index, *sub_der_index));
+                        }
+                    }
+                }
+            }
+            for (sub_der_index, syms) in syms_to_add {
+                if state_ders[sub_der_index].0.add_looks(&syms) {
+                    change = true;
+                }
+            }
+            for (index, sub_der_index) in looks_to_add {
+                let look = state_ders[index].0.look.clone();
+                // Clone because look is a reference to state_ders
+                if state_ders[sub_der_index].0.add_looks(&look) {
+                    change = true;
+                }
+            }
+        }
+    }
+
     pub fn new(
-        starting_syms: Vec<DottedDer<T, N>>,
+        mut starting_syms: Vec<DottedDer<T, N>>,
         greater_look: &HashSet<T>,
         g: &mut Grammar<T, N>,
         firsts: &HashMap<N, HashSet<T>>,
@@ -399,139 +543,51 @@ impl<T: Clone + Display + PartialEq + Eq + Hash + Ord, N: Clone + Display + Part
         T: Display,
         N: Display,
     {
-        // trace!("starting_syms: {:?}", starting_syms);
+        
         let mut should_print = false;
         if format!("{:?}", starting_syms) == "[S' -> .Is$, []]" {
             should_print = true;
         }
-        let mut queue: Vec<(DottedDer<T, N>, HashSet<T>)> = starting_syms
-            .iter()
-            .map(|der| (der.clone(), greater_look.clone()))
-            .collect();
         let mut state = State {
             ders: Vec::new(),
             next: HashMap::new(),
             goto: HashMap::new(),
         };
-        let mut state_ders: Vec<(DottedDer<T, N>, Vec<usize>)> = Vec::new();
-        // Keep filling state.ders with sub-derivations until there are no more
-        // Potential infinite loop here
-        while let Some((cur_der, cur_greater_look)) = queue.pop() {
-            let mut sub_der_indices = vec![state_ders.len()];
-            let sub_ders = cur_der.get_sub_derivations(g);
-            let mut look = HashSet::new();
-            // Add to greater_look depending on the location of the dot
-            match cur_der.next_dotted_sym() {
-                Some(Symbol::Tm(t)) => {
-                    look.insert(t.clone());
-                }
-                Some(Symbol::NonTm(n)) => {
-                    // Paste first(n) into look
-                    match firsts.get(&n) {
-                        Some(first) => {
-                            look.extend(first
-                                .iter()
-                                .map(|t| t.clone())
-                            );
-                        }
-                        None => {
-                            error!("No firsts for NonTm, {}", n);
-                            panic!();
-                        }
-                    }
-                }
-                None => {
-                    // if should_print {
-                    //     trace!("Extending greater_look, {}, into look, {}, for der, {}", cur_greater_look.to_string(), look.to_string(), cur_der);
-                    // }
-                    // Dot at end; paste greater_look into looks
-                    look.extend(cur_greater_look.clone());
 
-                }
+        // Create child tree
+        // Before you call add_looks, put greater_look into starting_syms if their dots are at the end
+        for der in &mut starting_syms {
+            if let None = der.dotted_sym() {
+                der.add_looks(greater_look);
             }
-            // Check if the der has already been processed
-            for mut sub_der in sub_ders {
-                let mut should_revisit = true;
-                // If a child is also in the queue, then add the looks from the child to the copy that is in the queue
-                // Ders in the queue do not have children yet, so there is no need to search the tree of children
-                for (prev_der, prev_greater_look) in &mut queue {
-                    if sub_der.equals_ignore_look(prev_der) {
-                        if should_print {
-                            trace!("Der, {}, with cur_greater_look, {}, adding look, {}, to future der, {}, on queue with greater_look, {}", cur_der, cur_greater_look.to_string(), look.to_string(), sub_der, prev_greater_look.to_string());
-                        }
-                        prev_der.add_looks(&look);
-                        prev_greater_look.extend(look.clone());
-                        should_revisit = false;
-                        break;
-                    }
-                }
-                // If a child is also already processed (in state_ders), then add the looks from the child to 
-                // those of the copy in state_ders and all its sub_ders and sub_sub_ders, etc.
-                // If a descendant in the queue (not in state_ders), add looks to the descendant in the queue
-                // and its greater look set, but it doesn't have children yet
-                let mut to_add = Vec::new();
-                for (prev_der, prev_sub_der_indices) in &mut state_ders {
-                    if sub_der.equals_ignore_look(prev_der) {
-                        // We can't add to previous greater_look, so if it was needed, we need to update its children
-                        if should_print {
-                            trace!("Der, {}, with cur_greater_look, {}, adding look, {} to previous der, {}, already processed", cur_der, cur_greater_look.to_string(), look.to_string(), sub_der);
-                        }
-                        for prev_sub_der_index in prev_sub_der_indices.iter() {
-                            to_add.push(*prev_sub_der_index);
-                        }
-                        prev_der.add_looks(&look);
-                        should_revisit = false;
-                        break;
-                    }
-                }
-                // Recursively add children of elements in to_add to to_add
-                let mut i = 0;
-                while i < to_add.len() {
-                    if to_add[i] < state_ders.len() {
-                        for index in &state_ders[to_add[i]].1 {
-                            if !to_add.contains(index) {
-                                to_add.push(*index);
-                            }
-                        }
-                    }
-                    i += 1;
-                }
-                if should_print && to_add.len() > 0 {
-                    trace!("Adding looks, {}, to previous ders at {:?}; state_ders.len(): {}", look.to_string(), to_add, state_ders.len());
-                    trace!("\tstate_ders:");
-                    for prev in &state_ders {
-                        trace!("\t\t{:?}", prev);
-                    }
-                }
-                for prev_sub_der_index in to_add {
-                    if prev_sub_der_index < state_ders.len() {
-                        if should_print {
-                            trace!("\t{:?}", state_ders[prev_sub_der_index]);
-                        }
-                        state_ders[prev_sub_der_index].0.add_looks(&look);
-                    } else if prev_sub_der_index - state_ders.len() < queue.len() {
-                        if should_print {
-                            trace!("\t({}, {})", queue[prev_sub_der_index - state_ders.len()].0, queue[prev_sub_der_index - state_ders.len()].1.to_string());
-                        }
-                        let (prev_der, prev_greater_look) = &mut queue[prev_sub_der_index - state_ders.len()];
-                        prev_der.add_looks(&look);
-                        prev_greater_look.extend(look.clone());
-                    } else {
-                        error!("Child index {} out of bounds for state_ders len {} and queue len {}", prev_sub_der_index, state_ders.len(), queue.len());
-                        panic!();
-                    }
-                }
-                if should_revisit {
-                    sub_der.add_looks(&look);
-                    if should_print {
-                        trace!("Der, {}, with cur_greater_look, {}, adding der, {}, with look, {}", cur_der, cur_greater_look.to_string(), sub_der, look.to_string());
-                    }
-                    sub_der_indices.push(queue.len() + state_ders.len());
-                    queue.push((sub_der, look.clone()));
-                }
-            }
-            state_ders.push((cur_der.clone(), sub_der_indices));
         }
+        let state_ders = Self::get_sub_der_graph(&starting_syms, g, should_print);
+
+        // Replace ChildGraphIndex with usize
+        let mut state_ders: Vec<(DottedDer<T, N>, Vec<usize>)> = match state_ders
+            .into_iter()
+            .map(|(der, cgis)| {
+                Ok((der, cgis
+                    .into_iter()
+                    .map(|cgi| match cgi {
+                        ChildGraphIndex::GraphInd(g_ind) => Ok(g_ind),
+                        ChildGraphIndex::StackInd(s_ind) => Err(format!("Stack index {} still in state ders", s_ind)),
+                    })
+                    .collect::<Result<Vec<usize>, String>>()?
+                ))
+            })
+            .collect::<Result<Vec<(DottedDer<T, N>, Vec<usize>)>, String>>() {
+                Ok(sd) => sd,
+                Err(msg) => {
+                    error!("{}", msg);
+                    panic!();
+                }
+            };
+
+
+        // Add looks to child tree
+        Self::add_looks(&mut state_ders, firsts);
+
         state.ders = state_ders
             .into_iter()
             .map(|(der, _)| der)
@@ -877,7 +933,7 @@ pub fn update_look_subseq<
         }
     }
     for (i, syms) in to_add {
-        all_similar[i].add_looks(&syms)
+        all_similar[i].add_looks(&syms);
     }
     
 }
@@ -917,18 +973,12 @@ pub fn lr1_generate<
     while i < states.len() {
         // Handle 1 state
         cur_state = &mut states[i];
-        if i == 0 {
-            trace!("cur_state: {}", cur_state);
-        }
         let mut states_to_add = Vec::new();
-        // println!("Creating child states for state {}: {}", i, cur_state);
         let mut queue = cur_state.ders.clone();
         while let Some(cur_der) = queue.pop() {
-            // let cur_sym = cur_der.dotted_sym();
             let cloned_der = cur_der.clone();
             let (der, dot, look) = cur_der.fields();
             if dot >= der.to.len() {
-                // println!("Not handling derivation for completion: {}", cur_der);
                 // Completed derivation (dot at end)
                 // Put a reduction at every column in the lookahead
                 for sym in &look {
@@ -938,7 +988,6 @@ pub fn lr1_generate<
                 continue;
             } else {
                 let sym = &der.to[dot];
-                // println!("Handling derivation: {}", cur_der);
                 // Find all derivations that would advance on the same symbol as der
                 let mut all_similar = Vec::new();
                 all_similar.append(
@@ -952,10 +1001,6 @@ pub fn lr1_generate<
                 );
                 queue.retain(|der| der.dotted_sym() != Some(sym));
                 all_similar.push(cloned_der);
-                if i == 0 {
-                    trace!("all_similar: {:?}", all_similar);
-                }
-                // println!("All similar derivations: {:?}", all_similar);
                 
                 update_look_subseq(&firsts, &mut all_similar);
                 let mut new_state = State::new(
@@ -975,11 +1020,9 @@ pub fn lr1_generate<
                     let shift_to;
                     let index_opt = states.iter().position(|state| *state == new_state);
                     if let Some(index) = index_opt {
-                        // println!("State already exists: {}", new_state);
                         action = Action::Shift(index);
                         shift_to = index;
                     } else {
-                        // println!("Creating new state {}: {}", states.len(), new_state);
                         action = Action::Shift(states.len());
                         shift_to = states.len();
                         states.push(new_state);
@@ -993,19 +1036,13 @@ pub fn lr1_generate<
                         );
                     }
                     states[i].add_next(t, action);
-                    // println!("");
-                    // if states.len() >= 30 {
-                    //     return Err("Too many states".to_string());
-                    // }
                 }
                 Symbol::NonTm(n) => {
                     let goto;
                     let index_opt = states.iter().position(|state| *state == new_state);
                     if let Some(index) = index_opt {
-                        // println!("State already exists: {}", new_state);
                         goto = index;
                     } else {
-                        // println!("Creating new state {}: {}", states.len(), new_state);
                         goto = states.len();
                         states.push(new_state);
                     }

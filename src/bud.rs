@@ -181,7 +181,7 @@ grammar::grammar!(
 
         // Expressions
         Expr    => BinaryExpr;     // Since NonBinExpr work as BinaryExpr
-        // Expr    => Expr, Semicolon;
+        Expr    => Expr, Semicolon;
 
         NonBinExpr  => BlockExpr;
         NonBinExpr  => AssignExpr;
@@ -203,12 +203,13 @@ grammar::grammar!(
         TypeExpr    => Star, LeftRound, TypeExpr, RightRound;
 
         BlockExpr   => LeftSquiggly, Expr2, RightSquiggly;
-        AssignExpr  => IdExpr, Assign, Expr, Semicolon;
-        VarDeclAssgn=> VarDecl, Assign, Expr, Semicolon;
-        ReturnExpr  => Return, Semicolon;
-        ReturnExpr  => Return, Expr, Semicolon;
+        AssignExpr  => IdExpr, Assign, Expr;
+        VarDeclAssgn=> VarDecl, Assign, Expr;
+        ReturnExpr  => Return;
+        ReturnExpr  => Return, Expr;
         IdExpr      => Expr, LeftSquare, Expr, RightSquare;
         IdExpr      => Expr, LeftRound, Exprs, RightRound;
+        IdExpr      => Expr, LeftRound, RightRound;
         IdExpr      => IdGen;
         ParenExpr   => LeftRound, Expr, RightRound;
         UnaryExpr   => Unop, NonBinExpr;
