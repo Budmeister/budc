@@ -71,7 +71,7 @@ struct
 &&
 ||
 &
-"
+|
 ^
 ==
 !=
@@ -167,7 +167,6 @@ Le -> str
 Le -> char
 Nbe -> break
 Nbe -> continue
-Nbe -> return
 
 # Operators
 B -> +

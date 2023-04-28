@@ -4,6 +4,7 @@
 extern crate proc_macros;
 
 pub mod bud;
+pub mod m68k;
 pub mod grammar;
 pub mod slp;
 
@@ -253,6 +254,7 @@ fn main() {
         }
     };
     let mut lex = bud::BudTerminal::lexer(&contents);
+    let tree;
     match lr1_parse(&log_options, &states, &mut lex, EOF, Error, bud::load_bud_data) {
         Ok(node_stack) => {
             if log_options.print_syntax_tree {
@@ -261,6 +263,17 @@ fn main() {
                 println!("");
                 debug!("End syntax tree");
             }
+            tree = node_stack.into_iter().next().unwrap();
+        }
+        Err(msg) => {
+            error!("{}", msg.yellow());
+            return;
+        }
+    }
+    let expander = m68k::BudExpander::new();
+    match expander.code_generate(&log_options, tree) {
+        Ok(code) => {
+
         }
         Err(msg) => {
             error!("{}", msg.yellow());

@@ -7,6 +7,7 @@ use std::{
     hash::Hash, ops::Range,
 };
 
+#[derive(Clone)]
 pub enum Node<T, N> {
     Tm(T),
     NonTm(N, Vec<Node<T, N>>),
@@ -273,8 +274,12 @@ const DEFAULT_INDENT: i32 = 4;
 
 fn get_indent(indent: i32) -> String {
     let mut retval = "".to_string();
-    for _ in 0..indent {
-        retval = retval + " ";
+    for i in 0..indent {
+        if i % DEFAULT_INDENT == 0 {
+            retval = retval + &"|".color("#404040");
+        } else {
+            retval = retval + " ";
+        }
     }
     retval
 }

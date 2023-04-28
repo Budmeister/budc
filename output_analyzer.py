@@ -8,6 +8,8 @@ import chardet
 import re
 import os
 
+GREY = '\x1b[90m'
+
 def yellow(string):
     return Fore.YELLOW + str(string) + Style.RESET_ALL
 
@@ -19,6 +21,9 @@ def blue(string):
 
 def green(string):
     return Fore.GREEN + str(string) + Style.RESET_ALL
+
+def grey(string):
+    return GREY + str(string) + Style.RESET_ALL
 
 output_dir = "output.txt"
 
@@ -260,7 +265,7 @@ def read_syntax_tree(lines, index):
         global syntax_tree
         syntax_tree = []
         while lines[index] != "End syntax tree":
-            syntax_tree.append(lines[index])
+            syntax_tree.append(lines[index].replace("|", grey("|")))
             index += 1
             if index >= len(lines):
                 return index
