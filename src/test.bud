@@ -1,17 +1,19 @@
 
-int fun() {
+i32 fun() {
     return 0;
 }
 
 struct my_struct {
-    int hello
+    i32 hello
 }
 
-type main() {
-    int a = 1;
-    int b = fun();
+i16 main() {
+    i8 a = 1;
+    i32 b = fun();
+    *(i8) d = &a;
+    i8[3] e = 0;
     
-    int c = a + b;
+    i32 c = a + b;
     printf("%d", c);
 
     if c < 10 {

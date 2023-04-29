@@ -1,6 +1,7 @@
 use std::{collections::{HashMap, HashSet}, fmt::Display};
 
-pub fn to_string<K: Display, V: ToStringCollection>(map: &HashMap<K, V>) -> String {
+// To string map of set
+pub fn to_string_mos<K: Display, V: ToStringCollection>(map: &HashMap<K, V>) -> String {
     let mut string = "{".to_owned();
     let mut first = true;
     for (k, v) in map {
@@ -10,7 +11,20 @@ pub fn to_string<K: Display, V: ToStringCollection>(map: &HashMap<K, V>) -> Stri
         first = false;
         string += &format!("{}: {}", k, v.to_string());
     }
-    string + "]"
+    string + "}"
+
+}
+pub fn to_string<K: Display, V: Display>(map: &HashMap<K, V>) -> String {
+    let mut string = "{".to_owned();
+    let mut first = true;
+    for (k, v) in map {
+        if !first {
+            string += ", ";
+        }
+        first = false;
+        string += &format!("{}: {}", k, v);
+    }
+    string + "}"
 
 }
 

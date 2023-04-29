@@ -561,7 +561,7 @@ impl Path {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VarDecl {
     pub typ: TypeExpr,
     pub id: Id,
@@ -612,7 +612,7 @@ impl VarDecl {
 }
 
 // Expressions
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Expr {
     pub bin_expr: Box<BinExpr>,
     pub with_semicolon: bool,
@@ -667,7 +667,7 @@ impl Expr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BinExpr {
     Binary(Box<NonBinExpr>, BudBinop, Box<BinExpr>),
     NonBin(Box<NonBinExpr>),
@@ -702,7 +702,7 @@ impl BinExpr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NonBinExpr {
     BlockExpr(Exprs),
     AssignExpr(Box<IdExpr>, Box<Expr>),
@@ -711,7 +711,7 @@ pub enum NonBinExpr {
     IdExpr(Box<IdExpr>),
     LitExpr(Literal),
     ParenExpr(Box<Expr>),
-    UnaryExpr(BudUnop, Box<Expr>),
+    UnaryExpr(BudUnop, Box<NonBinExpr>),
     IfExpr(Box<Expr>, Box<Expr>),
     IfElse(Box<Expr>, Box<Expr>, Box<Expr>),
     UnlExpr(Box<Expr>, Box<Expr>),
@@ -759,7 +759,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::AssignExpr, children));
             }
         }
     }
@@ -771,7 +771,7 @@ impl NonBinExpr {
                 NonBinExpr::VarDeclAssgn(Box::new(VarDecl::new(var)?), Box::new(Expr::new(expr)?)),
             ),
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::VarDeclAssgn, children));
             }
         }
     }
@@ -784,7 +784,7 @@ impl NonBinExpr {
                 Ok(NonBinExpr::ReturnExpr(Some(Box::new(Expr::new(expr)?))))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::ReturnExpr, children));
             }
         }
     }
@@ -800,13 +800,13 @@ impl NonBinExpr {
                 Ok(NonBinExpr::ParenExpr(Box::new(Expr::new(expr)?)))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::ParenExpr, children));
             }
         }
     }
     fn unary_expr(children: &Vec<Node<BudTerminal, BudNonTerminal>>) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::NonTm(N::Unop, u_children), Node::NonTm(N::Expr, expr)] => {
+            [Node::NonTm(N::Unop, u_children), Node::NonTm(N::NonBinExpr, nbe)] => {
                 let u;
                 match &u_children[..] {
                     [Node::Tm(u_t)] => {
@@ -818,11 +818,11 @@ impl NonBinExpr {
                 }
                 Ok(NonBinExpr::UnaryExpr(
                     BudUnop::new(u)?,
-                    Box::new(Expr::new(expr)?),
+                    Box::new(NonBinExpr::new(nbe)?),
                 ))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::UnaryExpr, children));
             }
         }
     }
@@ -835,7 +835,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::IfExpr, children));
             }
         }
     }
@@ -849,7 +849,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::IfElse, children));
             }
         }
     }
@@ -864,7 +864,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::UnlExpr, children));
             }
         }
     }
@@ -880,7 +880,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::UnlElse, children));
             }
         }
     }
@@ -893,7 +893,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::WhileExpr, children));
             }
         }
     }
@@ -906,13 +906,13 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::NonBinExpr, children));
+                return Err(format!("Invalid node for {} {:?}", N::DoWhile, children));
             }
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum IdExpr {
     SquareIndex(Box<Expr>, Box<Expr>),
     RoundIndex(Box<Expr>, Option<Exprs>),
@@ -944,7 +944,7 @@ impl IdExpr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TypeExpr {
     Id(Id),
     Array(Box<TypeExpr>, i32),
@@ -967,7 +967,7 @@ impl TypeExpr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Literal {
     Num(i32),
     Str(String),

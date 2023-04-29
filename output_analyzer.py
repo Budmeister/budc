@@ -44,6 +44,8 @@ action_table = None
 actions = None
 stack = None
 syntax_tree = None
+types_trace = None
+types = None
 
 def read_usage(lines, index):
     if index >= len(lines):
@@ -272,6 +274,45 @@ def read_syntax_tree(lines, index):
         index += 1
         return index
 
+def read_types_trace(lines, index):
+    if index >= len(lines) or lines[index] != "Types:":
+        print(red("Did not find types trace"))
+        return index
+    else:
+        print(green("Found types trace"))
+        index += 1
+        if index >= len(lines):
+            return index
+        global types_trace
+        types_trace = []
+        while lines[index] != "End types":
+            types_trace.append(lines[index])
+            index += 1
+            if index >= len(lines):
+                return index
+        index += 1
+        return index
+
+def read_types(lines, index):
+    if index >= len(lines) or lines[index] != "Types found:":
+        print(red("Did not find types"))
+        return index
+    else:
+        print(green("Found types"))
+        index += 1
+        if index >= len(lines):
+            return index
+        global types
+        types = []
+        while lines[index] != "End types found":
+            types.append(lines[index].strip())
+            index += 1
+            if index >= len(lines):
+                return index
+        index += 1
+        return index
+    
+
 def chardetect(dir):
     with open(dir, "rb") as file:
         rawdata = file.read(100000)
@@ -297,6 +338,7 @@ def read_output(dir):
     global actions
     global stack
     global syntax_tree
+    global types_trace
     trace = []
     debug = []
     info = []
@@ -314,6 +356,7 @@ def read_output(dir):
     actions = None
     stack = None
     syntax_tree = None
+    types_trace = None
     try:
         with open(dir, "r", encoding=chardetect(dir)) as file:
             all_lines = file.readlines()
@@ -351,6 +394,8 @@ def read_output(dir):
     index = read_action_table(to_read, index)
     index = read_actions(to_read, index)
     index = read_syntax_tree(to_read, index)
+    index = read_types_trace(to_read, index)
+    index = read_types(to_read, index)
 
 def read(*args):
     if len(args) > 0:
@@ -516,6 +561,18 @@ def print_stack_states(*args):
     else:
         print("No stack found")
 
+def print_types_trace(*args):
+    if types_trace is not None:
+        [print(x) for x in types_trace]
+    else:
+        print("Types trace not found")
+
+def print_types(*args):
+    if types is not None:
+        [print(x) for x in types]
+    else:
+        print("Types not found")
+
 def pad_back(string, length):
     while len(string) < length:
         string += " "
@@ -603,6 +660,8 @@ commands = {
     "actions":          (print_actions,                             "Print the actions taken in parsing"),
     "stack":            (print_stack,                               "Print the final stack of the parser"),
     "stackstates":      (print_stack_states,                        "Pretty print all the states on the stack"),
+    "typetrace":        (print_types_trace,                          "Print the trace of the type-finding algorithm"),
+    "type":             (print_types,                               "Print the list of types found in the program"),
     "regex":            (regex,                                     "Find lines that match the given regular expression"),
     "tree":             (print_syntax_tree,                         "Print the produced syntax tree - Can be large"),
     "exit":             (lambda *args: exit(),                      "Quit the analyzer"),

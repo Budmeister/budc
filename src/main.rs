@@ -108,7 +108,7 @@ fn get_logging_level(args: &HashSet<String>) -> log::LevelFilter {
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        println!("Usage: {} filename.slp", args[0]);
+        println!("Usage: {} filename.bud", args[0]);
         return;
     }
     let filename = args[1].to_string();
@@ -124,14 +124,14 @@ fn main() {
     }
     let mut log_options = LoggingOptions{
         print_log_options: false,
-        print_grammar: true,
-        print_firsts: true,
+        print_grammar: false,
+        print_firsts: false,
         print_firsts_actions: false,
         print_state_transitions: false,
         print_states: false,
         print_action_table: false,
-        print_actions: true,
-        print_syntax_tree: true,
+        print_actions: false,
+        print_syntax_tree: false,
     };
     get_logging_options(&args, &mut log_options);
     if log_options.print_log_options {
