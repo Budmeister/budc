@@ -189,6 +189,8 @@ fn main() {
             BlockExpr,
             AssignExpr,
             ReturnExpr,
+            CleanupCall,
+            CleanupExpr,
             IdExpr,
             LitExpr,
             ParenExpr,
@@ -222,6 +224,7 @@ fn main() {
             Else,
             Import,
             Return,
+            Cleanup,
             Do,
             While,
             Break,
@@ -233,7 +236,7 @@ fn main() {
             Div,
             And,
             Or,
-            Ambersand,
+            BitAnd,
             BitOr,
             BitXor,
             Equal,
@@ -243,6 +246,7 @@ fn main() {
             Less,
             LessEq,
             Not,
+            Reference,
         ],
     ) {
         Ok(s) => {

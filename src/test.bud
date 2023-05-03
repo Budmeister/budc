@@ -10,7 +10,7 @@ struct my_struct {
 i16 main() {
     i8 a = 1;
     i32 b = fun();
-    *(i8) d = &a;
+    @(i8) d = @a;
     i8[3] e = 0;
     
     i32 c = a + b;

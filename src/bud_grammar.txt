@@ -20,9 +20,11 @@ E2 (Expr2)              [One or more expressions in a row--for statement express
 Es (Exprs)              [One or more comma-separated expressions]
 Nbe (NonBinExpr)        [An expression that is not a binary expression]
 Ble (BlockExpr)         [An Expr2 in squiggly brackets]
-Ae (AssignExpr)         [IdExpr = Expr -                        statement = ends in ;]
-Va (VarDeclAssgn)       [Variable declaration and assignment -  statement = ends in ;]
-Re (ReturnExpression)   [Return statement -                     statement = ends in ;]
+Ae (AssignExpr)         [IdExpr = Expr;]
+Va (VarDeclAssgn)       [Variable declaration and assignment (with ;)]
+Re (ReturnExpression)   [Return statement (with ;)]
+Cc (CleanupCall)        [Call to the cleanup sequence (with ;)]
+Ce (CleanupExpr)        [Definition of the cleanup sequence - must be at the end of a function (with ;)]
 Ie (IdExpr)             [Expression that can be assigned as if it is an id]
 Le (LitExpr)            [Literal expression, int, string, char]
 Pe (ParenExpr)          [Parenthetical Expression]
@@ -35,7 +37,7 @@ Ul (UnlExpr)
 Ule (UnlElse)
 We (WhileExpr)
 Dw (DoWhile)
-U (UnaryOp)             [!, -, *, &]
+U (UnaryOp)             [!, -, *, @ (the reference operator)]
 B (BinOp)               [+, -, *, /, &&, ||, &, |, ^, ==, !=, >, >=, <, <=]
 
 
@@ -79,6 +81,7 @@ struct
 <
 <=
 !
+@
 
 
 Grammar:
@@ -125,6 +128,8 @@ Nbe -> Ble
 Nbe -> Ae
 Nbe -> Va
 Nbe -> Re
+Nbe -> Cc
+Nbe -> Ce
 Nbe -> Ie
 Nbe -> Le
 Nbe -> Pe
@@ -138,17 +143,20 @@ Nbe -> Dw
 
 Te -> id
 Te -> Te[num]
-Te -> *(Te)
+Te -> @(Te)     # @ is the reference operator
 
 Ble -> { E2 }
-Ae -> Ie = E
-Va -> V = E
-Re -> return
-Re -> return Expr
+Ae -> Ie = E;
+Va -> V = E;
+Re -> return;
+Re -> return Expr;
+Cc -> cleanup;
+Ce -> cleanup Expr;
 Ie -> E[E]      # If this is illegal, it will be caught by the expander.
 Ie -> E(Es)     # Parenthetical indexing causes bounds checking at runtime.
 Ie -> E()
 Ie -> id
+Ie -> @Ie
 Pe -> ( E )
 Ue -> U Nbe
 Be -> Nbe B Be

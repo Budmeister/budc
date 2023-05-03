@@ -48,6 +48,8 @@ grammar::grammar!(
         Import,
         #[token("return")]
         Return,
+        #[token("cleanum")]
+        Cleanup,
         #[token("do")]
         Do,
         #[token("while")]
@@ -74,7 +76,7 @@ grammar::grammar!(
         #[token("||")]
         Or,
         #[token("&")]
-        Ambersand,
+        BitAnd,
         #[token("|")]
         BitOr,
         #[token("^")]
@@ -93,6 +95,8 @@ grammar::grammar!(
         LessEq,
         #[token("!")]
         Not,
+        #[token("@")]
+        Reference,
 
 
         // Logos requires one token variant to handle errors,
@@ -126,6 +130,8 @@ grammar::grammar!(
         BlockExpr,
         AssignExpr,
         ReturnExpr,
+        CleanupCall,
+        CleanupExpr,
         IdExpr,
         LitExpr,
         ParenExpr,
@@ -187,6 +193,8 @@ grammar::grammar!(
         NonBinExpr  => AssignExpr;
         NonBinExpr  => VarDeclAssgn;
         NonBinExpr  => ReturnExpr;
+        NonBinExpr  => CleanupCall;
+        NonBinExpr  => CleanupExpr;
         NonBinExpr  => IdExpr;
         NonBinExpr  => LitExpr;
         NonBinExpr  => ParenExpr;
@@ -200,17 +208,20 @@ grammar::grammar!(
 
         TypeExpr    => IdGen;
         TypeExpr    => TypeExpr, LeftSquare, NumGen, RightSquare;
-        TypeExpr    => Star, LeftRound, TypeExpr, RightRound;
+        TypeExpr    => Reference, LeftRound, TypeExpr, RightRound;
 
         BlockExpr   => LeftSquiggly, Expr2, RightSquiggly;
-        AssignExpr  => IdExpr, Assign, Expr;
-        VarDeclAssgn=> VarDecl, Assign, Expr;
-        ReturnExpr  => Return;
-        ReturnExpr  => Return, Expr;
+        AssignExpr  => IdExpr, Assign, Expr, Semicolon;
+        VarDeclAssgn=> VarDecl, Assign, Expr, Semicolon;
+        ReturnExpr  => Return, Semicolon;
+        ReturnExpr  => Return, Expr, Semicolon;
+        CleanupCall => Cleanup, Semicolon;
+        CleanupExpr => Cleanup, Expr, Semicolon;
         IdExpr      => Expr, LeftSquare, Expr, RightSquare;
         IdExpr      => Expr, LeftRound, Exprs, RightRound;
         IdExpr      => Expr, LeftRound, RightRound;
         IdExpr      => IdGen;
+        IdExpr      => Reference, IdExpr;
         ParenExpr   => LeftRound, Expr, RightRound;
         UnaryExpr   => Unop, NonBinExpr;
         BinaryExpr  => NonBinExpr, Binop, BinaryExpr;
@@ -236,7 +247,7 @@ grammar::grammar!(
         Binop       => Div;
         Binop       => And;
         Binop       => Or;
-        Binop       => Ambersand;
+        Binop       => BitAnd;
         Binop       => BitOr;
         Binop       => BitXor;
         Binop       => Equal;
@@ -247,7 +258,6 @@ grammar::grammar!(
         Binop       => LessEq;
         Unop        => Not;
         Unop        => Star;
-        Unop        => Ambersand;
         Unop        => Minus;
 
     }
@@ -324,7 +334,7 @@ impl BudBinop {
             BudTerminal::Div => Ok(BudBinop::Div),
             BudTerminal::And => Ok(BudBinop::And),
             BudTerminal::Or => Ok(BudBinop::Or),
-            BudTerminal::Ambersand => Ok(BudBinop::BitAnd),
+            BudTerminal::BitAnd => Ok(BudBinop::BitAnd),
             BudTerminal::BitOr => Ok(BudBinop::BitOr),
             BudTerminal::BitXor => Ok(BudBinop::BitXor),
             BudTerminal::Equal => Ok(BudBinop::Equal),
@@ -370,7 +380,7 @@ impl BudUnop {
             BudTerminal::Not => Ok(BudUnop::Not),
             BudTerminal::Minus => Ok(BudUnop::Neg),
             BudTerminal::Star => Ok(BudUnop::Deref),
-            BudTerminal::Ambersand => Ok(BudUnop::Ref),
+            BudTerminal::Reference => Ok(BudUnop::Ref),
             _ => Err(format!("Invalid unop: {}", u)),
         }
     }
@@ -405,6 +415,7 @@ impl std::fmt::Display for BudTerminal {
                 BudTerminal::Else => "else".to_string(),
                 BudTerminal::Import => "import".to_string(),
                 BudTerminal::Return => "return".to_string(),
+                BudTerminal::Cleanup => "cleanup".to_string(),
                 BudTerminal::Do => "do".to_string(),
                 BudTerminal::While => "while".to_string(),
                 BudTerminal::Break => "break".to_string(),
@@ -417,7 +428,7 @@ impl std::fmt::Display for BudTerminal {
                 BudTerminal::Div => "/".to_string(),
                 BudTerminal::And => "&&".to_string(),
                 BudTerminal::Or => "||".to_string(),
-                BudTerminal::Ambersand => "&".to_string(),
+                BudTerminal::BitAnd => "&".to_string(),
                 BudTerminal::BitOr => "|".to_string(),
                 BudTerminal::BitXor => "^".to_string(),
                 BudTerminal::Equal => "==".to_string(),
@@ -427,6 +438,7 @@ impl std::fmt::Display for BudTerminal {
                 BudTerminal::Less => "<".to_string(),
                 BudTerminal::LessEq => "<=".to_string(),
                 BudTerminal::Not => "!".to_string(),
+                BudTerminal::Reference => "@".to_string(),
                 BudTerminal::Error => "ERROR".to_string(),
                 BudTerminal::EOF => "$".to_string(),
             }
@@ -461,6 +473,8 @@ impl std::fmt::Display for BudNonTerminal {
                 BudNonTerminal::VarDeclAssgn => "Va",
                 BudNonTerminal::AssignExpr => "Ae",
                 BudNonTerminal::ReturnExpr => "Re",
+                BudNonTerminal::CleanupCall => "Cc",
+                BudNonTerminal::CleanupExpr => "Ce",
                 BudNonTerminal::IdExpr => "Ie",
                 BudNonTerminal::LitExpr => "Le",
                 BudNonTerminal::ParenExpr => "Pe",
@@ -708,6 +722,8 @@ pub enum NonBinExpr {
     AssignExpr(Box<IdExpr>, Box<Expr>),
     VarDeclAssgn(Box<VarDecl>, Box<Expr>),
     ReturnExpr(Option<Box<Expr>>),
+    CleanupCall,
+    CleanupExpr(Box<Expr>),
     IdExpr(Box<IdExpr>),
     LitExpr(Literal),
     ParenExpr(Box<Expr>),
@@ -728,6 +744,8 @@ impl NonBinExpr {
             [Node::NonTm(N::AssignExpr, children)] => Self::assign_expr(children),
             [Node::NonTm(N::VarDeclAssgn, children)] => Self::var_decl_assign(children),
             [Node::NonTm(N::ReturnExpr, children)] => Self::return_expr(children),
+            [Node::NonTm(N::CleanupCall, children)] => Self::cleanup_call(children),
+            [Node::NonTm(N::CleanupExpr, children)] => Self::cleanup_expr(children),
             [Node::NonTm(N::IdExpr, children)] => Self::id_expr(children),
             [Node::NonTm(N::LitExpr, children)] => Self::lit_expr(children),
             [Node::NonTm(N::ParenExpr, children)] => Self::paren_expr(children),
@@ -752,7 +770,7 @@ impl NonBinExpr {
         children: &Vec<Node<BudTerminal, BudNonTerminal>>,
     ) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::NonTm(N::IdExpr, id_expr), Node::Tm(T::Assign), Node::NonTm(N::Expr, expr)] => {
+            [Node::NonTm(N::IdExpr, id_expr), Node::Tm(T::Assign), Node::NonTm(N::Expr, expr), Node::Tm(T::Semicolon)] => {
                 Ok(NonBinExpr::AssignExpr(
                     Box::new(IdExpr::new(id_expr)?),
                     Box::new(Expr::new(expr)?),
@@ -767,7 +785,7 @@ impl NonBinExpr {
         children: &Vec<Node<BudTerminal, BudNonTerminal>>,
     ) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::NonTm(N::VarDecl, var), Node::Tm(T::Assign), Node::NonTm(N::Expr, expr)] => Ok(
+            [Node::NonTm(N::VarDecl, var), Node::Tm(T::Assign), Node::NonTm(N::Expr, expr), Node::Tm(T::Semicolon)] => Ok(
                 NonBinExpr::VarDeclAssgn(Box::new(VarDecl::new(var)?), Box::new(Expr::new(expr)?)),
             ),
             _ => {
@@ -779,12 +797,34 @@ impl NonBinExpr {
         children: &Vec<Node<BudTerminal, BudNonTerminal>>,
     ) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::Tm(T::Return)] => Ok(NonBinExpr::ReturnExpr(None)),
-            [Node::Tm(T::Return), Node::NonTm(N::Expr, expr)] => {
+            [Node::Tm(T::Return), Node::Tm(T::Semicolon)] => Ok(NonBinExpr::ReturnExpr(None)),
+            [Node::Tm(T::Return), Node::NonTm(N::Expr, expr), Node::Tm(T::Semicolon)] => {
                 Ok(NonBinExpr::ReturnExpr(Some(Box::new(Expr::new(expr)?))))
             }
             _ => {
                 return Err(format!("Invalid node for {} {:?}", N::ReturnExpr, children));
+            }
+        }
+    }
+    fn cleanup_call(
+        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+    ) -> Result<NonBinExpr, String> {
+        match &children[..] {
+            [Node::Tm(T::Cleanup), Node::Tm(T::Semicolon)] => Ok(NonBinExpr::CleanupCall),
+            _ => {
+                return Err(format!("Invalid node for {} {:?}", N::CleanupCall, children));
+            }
+        }
+    }
+    fn cleanup_expr(
+        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+    ) -> Result<NonBinExpr, String> {
+        match &children[..] {
+            [Node::Tm(T::Cleanup), Node::NonTm(N::Expr, expr), Node::Tm(T::Semicolon)] => {
+                Ok(NonBinExpr::CleanupExpr(Box::new(Expr::new(expr)?)))
+            }
+            _ => {
+                return Err(format!("Invalid node for {} {:?}", N::CleanupExpr, children));
             }
         }
     }
@@ -917,6 +957,7 @@ pub enum IdExpr {
     SquareIndex(Box<Expr>, Box<Expr>),
     RoundIndex(Box<Expr>, Option<Exprs>),
     Id(Id),
+    Reference(Box<IdExpr>),
 }
 impl IdExpr {
     pub fn new(children: &BudNodes) -> Result<IdExpr, String> {
@@ -937,6 +978,9 @@ impl IdExpr {
                 Ok(IdExpr::RoundIndex(Box::new(Expr::new(arr)?), None))
             }
             [Node::Tm(T::Id(id))] => Ok(IdExpr::Id(id.to_owned())),
+            [Node::Tm(T::Reference), Node::NonTm(N::IdExpr, ide)] => {
+                Ok(IdExpr::Reference(Box::new(IdExpr::new(ide)?)))
+            }
             _ => {
                 return Err(format!("Invalid node for {} {:?}", N::IdExpr, children));
             }
@@ -957,7 +1001,7 @@ impl TypeExpr {
             [Node::NonTm(N::TypeExpr, typ), Node::Tm(T::LeftSquare), Node::Tm(T::Num(num)), Node::Tm(T::RightSquare)] => {
                 Ok(TypeExpr::Array(Box::new(TypeExpr::new(typ)?), *num))
             }
-            [Node::Tm(T::Star), Node::Tm(T::LeftRound), Node::NonTm(N::TypeExpr, typ), Node::Tm(T::RightRound)] => {
+            [Node::Tm(T::Reference), Node::Tm(T::LeftRound), Node::NonTm(N::TypeExpr, typ), Node::Tm(T::RightRound)] => {
                 Ok(TypeExpr::Pointer(Box::new(TypeExpr::new(typ)?)))
             }
             _ => {

@@ -674,7 +674,10 @@ def execute(command):
     command, *args = command.split()
     if command not in commands:
         print(f"Unknown command: {command}")
-        command = "help"
+        print()
+        print("\tType `help` for a list of commands")
+        print()
+        return
     commands[command][0](*args)
 
 if __name__ == "__main__":
