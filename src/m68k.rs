@@ -1,11 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::RangeFrom;
 
-use crate::bud::{BinExpr, Expr, NonBinExpr, TypeExpr, VarDecl, BudBinop};
+use crate::bud::{BinExpr, Expr, NonBinExpr, TypeExpr, VarDecl, BudBinop, IdExpr, Literal};
 use crate::logging::LoggingOptions;
 use crate::tools::ToStringCollection;
 use crate::{bud, parse::Node};
 use log::*;
+
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub enum Choice<T, U> {
+    Some(T),
+    Other(U),
+}
 
 pub struct BudExpander {}
 impl BudExpander {
@@ -183,12 +189,14 @@ impl BudExpander {
         let items = bud::Item::news(&children)?;
 
         let mut funcs = Vec::new();
+        let mut func_names = Vec::new();
         let mut structs = Vec::new();
         let mut imports = Vec::new();
 
         for item in items {
             match item {
                 bud::Item::FuncDecl(name, args, expr) => {
+                    func_names.push(name.id.clone());
                     funcs.push((name, args, expr));
                 }
                 bud::Item::StructDecl(name, fields) => {
@@ -198,9 +206,8 @@ impl BudExpander {
             }
         }
 
-        let mut environment = Environment::new();
         let built_in = Self::get_built_in_types();
-        let funcs = environment.add_types(structs, built_in, funcs)?;
+        let (environment, funcs) = Environment::new(structs, built_in, funcs)?;
 
         debug!("Types found: ");
         environment.types
@@ -209,6 +216,21 @@ impl BudExpander {
                 debug!("\t{}", typ);
             });
         debug!("End types found");
+        let mut num_errors = 0;
+        trace!("Funcs: {:?}", funcs.keys());
+        for (name, func) in funcs {
+            match func.compile(0.., &environment) {
+                Ok(_) => {},
+                Err(msg) => {
+                    error!("In function {},", name);
+                    error!("{}", msg);
+                    num_errors += 1;
+                }
+            };
+        }
+        if num_errors != 0 {
+            return Err(format!("Unable to compile all functions because of errors in {} functions", num_errors));
+        }
 
         Ok(environment)
     }
@@ -318,20 +340,13 @@ pub struct Environment {
     pub structs: HashMap<String, TypeType>, // Give me a struct name, and I'll give you the TypeType for that struct
 }
 impl Environment {
-    pub fn new() -> Environment {
-        Environment {
-            types: HashMap::new(),
-            structs: HashMap::new(),
-        }
-    }
     // This is the only chance to add raw types
     // This function also creates the Function objects
-    pub fn add_types(
-        &mut self,
+    pub fn new(
         structs: Vec<(String, Vec<VarDecl>)>,
         mut built_in: HashMap<TypeType, Type>,
         funcs: Vec<(VarDecl, Vec<VarDecl>, Box<Expr>)>,
-    ) -> Result<HashMap<String, Function>, String> {
+    ) -> Result<(Environment, HashMap<String, Function>), String> {
         debug!("Types:");
         // Get the names (TypeTypes) for all types so that
         // Type objects can be created later
@@ -424,25 +439,25 @@ impl Environment {
             })
             .collect::<Result<HashMap<TypeType, Type>, String>>()?;
         
-        self.types = types;
-        self.structs = HashMap::new();
-        for (tt, _) in &self.types {
+        let mut structs = HashMap::new();
+        for (tt, _) in &types {
             if let TypeType::Struct(name, _) = tt {
-                self.structs.insert(name.to_owned(), tt.to_owned());
+                structs.insert(name.to_owned(), tt.to_owned());
             }
         }
+        let env = Environment { types, structs };
         let funcs = funcs
             .into_iter()
             .map(|(name, args, expr)| {
                 Ok((
                     name.id.to_owned(),
-                    Function::new(name, args, expr, self)?
+                    Function::new(name, args, expr, &env)?
                 ))
             })
             .collect::<Result<HashMap<String, Function>, String>>()?;
 
         debug!("End types");
-        Ok(funcs)
+        Ok((env, funcs))
     }
 
     // Get the positon of each element in a struct and the size of the struct
@@ -485,6 +500,11 @@ impl Field {
             typ: TypeType::new(vd.typ, environment),
             name: vd.id,
         }
+    }
+}
+impl std::fmt::Display for Field {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.typ, self.name)
     }
 }
 
@@ -657,6 +677,7 @@ pub enum Place {
     Var(Field),
     AReg(AReg, TypeType),
     DReg(DReg, TypeType),
+    Ref(Box<Place>, Choice<Box<Place>, i32>),    // (location of the pointer, offset)
 }
 impl Place {
     pub fn get_type(&self) -> TypeType {
@@ -669,6 +690,9 @@ impl Place {
             }
             Place::DReg(_, tt) => {
                 tt.clone()
+            }
+            Place::Ref(place, _) => {
+                place.get_type()
             }
         }
     }
@@ -684,6 +708,26 @@ impl Place {
             32 => Some(DataSize::LWord),
             _ => None,
         }
+    }
+}
+impl std::fmt::Display for Place {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            Place::Var(field) => field.to_string(),
+            Place::AReg(areg, tt) => format!("{} {}", tt, areg),
+            Place::DReg(dreg, tt) => format!("{} {}", tt, dreg),
+            Place::Ref(place, offset) => {
+                match offset {
+                    Choice::Some(off_place) => format!("{}[{}]", place, off_place),
+                    Choice::Other(lit) => format!("{}[{}]", place, lit),
+                }
+            },
+        })
+    }
+}
+impl std::fmt::Debug for Place {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
     }
 }
 
@@ -742,6 +786,7 @@ impl ReturnPlan {
 
 // I am using these Intermediate Instructions to represent 
 // instructions before I have generated the stack frame
+#[derive(Debug)]
 pub enum InterInstr {
     Binop(DataSize, Place, BudBinop, Place),    // Dest. on right (SUB subtracts src from dest. and stores in dest.; DIV, too)
     Binopi(Imm, BudBinop, Place),
@@ -814,7 +859,7 @@ impl FunctionInterEnvironment {
     pub fn var_name_from_temp(temp: usize) -> String {
         format!("[t{}]", temp)
     }
-    fn get_temp(&mut self, tt: TypeType) -> Place {
+    fn _get_temp(&mut self, tt: TypeType) -> Place {
         for temp in 0.. {
             let name = Self::var_name_from_temp(temp);
             match self.vars.get_mut(&name.clone()) {
@@ -846,7 +891,7 @@ impl FunctionInterEnvironment {
             Some(typ) => typ.size,
             None => panic!("Invalid typetype found: {}", tt),
         };
-        if size < BudExpander::REG_SIZE {
+        if size <= BudExpander::REG_SIZE {
             // If a data register is available, give it out
             for (dreg, used) in &mut self.dregs {
                 if !*used {
@@ -856,7 +901,7 @@ impl FunctionInterEnvironment {
             }
         }
         // Else, see if a temporary variable is available
-        self.get_temp(tt)
+        self._get_temp(tt)
     }
     pub fn get_addr_place(&mut self, tt: TypeType, env: &Environment) -> Place {
         // If the requested Place could fit in a register
@@ -864,7 +909,7 @@ impl FunctionInterEnvironment {
             Some(typ) => typ.size,
             None => panic!("Invalid typetype found: {}", tt),
         };
-        if size < BudExpander::REG_SIZE {
+        if size <= BudExpander::REG_SIZE {
             // If a addr register is available, give it out
             for (areg, used) in &mut self.aregs {
                 if !*used {
@@ -874,7 +919,23 @@ impl FunctionInterEnvironment {
             }
         }
         // Else, see if a temporary variable is available
-        self.get_temp(tt)
+        self._get_temp(tt)
+    }
+    pub fn free_place(&mut self, place: &Place) {
+        match place {
+            Place::Var(id) => {
+                if let Some((_, used)) = self.vars.get_mut(&id.name) {
+                    *used = false;
+                }
+            },
+            Place::AReg(a, _) => {
+                self.aregs[*a as usize].1 = false;
+            },
+            Place::DReg(d, _) => {
+                self.dregs[*d as usize].1 = false;
+            },
+            Place::Ref(_, _) => {},
+        }
     }
     // Saves all used regs by pushing them to the stack
     pub fn save_regs(instrs: &mut Vec<InterInstr>) -> Vec<ADReg> {
@@ -885,10 +946,6 @@ impl FunctionInterEnvironment {
         todo!()
     }
 
-
-    pub fn free_place(place: Place) {
-        todo!()
-    }
 }
 
 
@@ -928,7 +985,7 @@ impl Function {
         } else {
             plan = ReturnPlan::Move(Place::DReg(D0, self.signature.name.typ));
         }
-        Self::compile_expression(
+        Self::compile_expr(
             self.expr,
             plan,
             &mut instrs,
@@ -939,9 +996,13 @@ impl Function {
         // Things we need to know (from searching the function expression):
         //  * String literals
         //  * All local variables (can be Fields)
+        trace!("Instructions for function {}", self.signature.name.name);
+        for instr in &instrs {
+            trace!("{:?}", instr);
+        }
         todo!()
     }
-    pub fn compile_expression(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         Self::compile_bin_expr(*expr.bin_expr,
             if expr.with_semicolon {
                 ReturnPlan::None
@@ -957,13 +1018,16 @@ impl Function {
                 match plan {
                     ReturnPlan::Binop(pb, place) => {
                         // Make the temporary variable with the same type as the ReturnPlan
+                        // As a future optimization, we do not need to get a new place if
+                        // both binops are the same and if the binop is associative
                         let temp = fienv.get_data_place(place.get_type(), env);
                         let plan = ReturnPlan::Move(temp.clone());
                         Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
                         let plan = ReturnPlan::Binop(b, temp.clone());
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
                         let ret_action = ReturnPlan::Binop(pb, place)
-                            .into_inter_instr(temp, env)?;
+                            .into_inter_instr(temp.clone(), env)?;
+                        fienv.free_place(&temp);
                         match ret_action {
                             Some(mut ret_instrs) => instrs.append(&mut ret_instrs),
                             None => {},
@@ -989,7 +1053,127 @@ impl Function {
         Ok(())
     }
     pub fn compile_non_bin_expr(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        todo!()
+        match nbe {
+            NonBinExpr::BlockExpr(exprs)        => Self::compile_block_expr(exprs, plan, instrs, label_gen, fienv, env)?,
+            NonBinExpr::AssignExpr(id, expr)    => Self::compile_assign_expr(*id, *expr, plan, instrs, label_gen, fienv, env)?,
+            NonBinExpr::VarDeclAssgn(_, _)  => warn!("Not implemented"),
+            NonBinExpr::ReturnExpr(_)       => warn!("Not implemented"),
+            NonBinExpr::CleanupCall         => warn!("Not implemented"),
+            NonBinExpr::CleanupExpr(_)      => warn!("Not implemented"),
+            NonBinExpr::IdExpr(_)           => warn!("Not implemented"),
+            NonBinExpr::LitExpr(_)          => warn!("Not implemented"),
+            NonBinExpr::ParenExpr(_)        => warn!("Not implemented"),
+            NonBinExpr::UnaryExpr(_, _)     => warn!("Not implemented"),
+            NonBinExpr::IfExpr(_, _)        => warn!("Not implemented"),
+            NonBinExpr::IfElse(_, _, _)     => warn!("Not implemented"),
+            NonBinExpr::UnlExpr(_, _)       => warn!("Not implemented"),
+            NonBinExpr::UnlElse(_, _, _)    => warn!("Not implemented"),
+            NonBinExpr::WhileExpr(_, _)     => warn!("Not implemented"),
+            NonBinExpr::DoWhile(_, _)       => warn!("Not implemented"),
+            NonBinExpr::Break               => warn!("Not implemented"),
+            NonBinExpr::Continue            => warn!("Not implemented"),
+        }
+        Ok(())
+    }
+    pub fn compile_block_expr(mut exprs: Vec<Expr>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+                let last = match exprs.pop() {
+                    Some(expr) => expr,
+                    None => {
+                        // Empty block expression
+                        match &plan {
+                            ReturnPlan::None => {
+                                return Ok(());
+                            },
+                            ReturnPlan::Binop(b, place) => {
+                                return Err(format!("Empty block expression but expected to return to a binop expression, {} at {}", b, place));
+                            }
+                            ReturnPlan::Move(place) => {
+                                return Err(format!("Empty block expression but expected to move result to {}", place));
+                            }
+                        }
+                    },
+                };
+
+                for expr in exprs {
+                    Self::compile_expr(expr, ReturnPlan::None, instrs, label_gen, fienv, env)?;
+                    // Check that the expressions have semicolons?
+                    // If we were to print errors and recover, this would be a good point to do it
+                }
+                Self::compile_expr(last, plan, instrs, label_gen, fienv, env)?;
+                Ok(())
+    }
+    pub fn compile_assign_expr(id: IdExpr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        // Check that the variable exists
+        let (place, to_free) = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
+        let assign_plan = ReturnPlan::Move(place.clone());
+        Self::compile_expr(expr, assign_plan, instrs, label_gen, fienv, env)?;
+        for tf in to_free {
+            fienv.free_place(&tf);
+        }
+        plan.into_inter_instr(place, env)?;
+        Ok(())
+    }
+    // (id place, places of calculated offsets if any)
+    pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(Place, Vec<Place>), String> {
+        match id {
+            IdExpr::SquareIndex(id, offset) => {
+                // The id must be assignable
+                match *id.bin_expr {
+                    BinExpr::NonBin(nbe) => {
+                        if let NonBinExpr::IdExpr(id_expr) = *nbe {
+                            let (id_place, mut to_free) = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
+                            // Check if the offset is a literal value
+                            let mut lit = None;
+                            if let BinExpr::NonBin(nbe) = &*offset.bin_expr {
+                                if let NonBinExpr::LitExpr(Literal::Num(num)) = &**nbe {
+                                    lit = Some(*num);
+                                }
+                            }
+                            match lit {
+                                Some(num) => {
+                                    let place = Place::Ref(Box::new(id_place), Choice::Other(num));
+                                    return Ok((place, to_free));
+                                }
+                                None => {
+                                    let off_place = fienv.get_data_place(TypeType::Id("i32".to_owned()), env);
+                                    to_free.push(off_place.clone());
+                                    let plan = ReturnPlan::Move(off_place.clone());
+                                    Self::compile_expr(*offset, plan, instrs, label_gen, fienv, env)?;
+                                    let place = Place::Ref(Box::new(id_place), Choice::Some(Box::new(off_place)));
+                                    return Ok((place, to_free));
+                                }
+                            }
+                        }
+                        // id was a NonBinExpr but not an IdExpr
+                        Err(format!("Expression not assignable"))
+                    }
+                    BinExpr::Binary(_, b, _) => {
+                        // id was not a NonBinExpr (it was a BinExpr)
+                        Err(format!("Cannot assign to binary expression, {}", b))
+                    }
+                }
+            },
+            IdExpr::RoundIndex(_, _) => todo!(),
+            IdExpr::Id(id) => {
+                // We need to store the result of expr into the variable, id
+                let place = match fienv.vars.get(&id) {
+                    Some((field, _)) => {
+                        Place::Var(field.clone())
+                    },
+                    None => {
+                        return Err(format!("Undeclared variable {}", id));
+                    }
+                };
+                Ok((place, Vec::new()))
+            },
+            IdExpr::Reference(id_expr) => {
+                // We need to store the result of expr into the memory
+                // location pointed to by the variable, id
+                let (id_place, to_free) = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
+                let place = Place::Ref(Box::new(id_place), Choice::Other(0));
+                Ok((place, to_free))
+            },
+        }
     }
 }
 
@@ -1084,7 +1268,7 @@ impl std::fmt::Display for GReg {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum DataSize {
     Byte,
     Word,
@@ -1100,7 +1284,7 @@ impl std::fmt::Display for DataSize {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum Imm {
     Byte(i8),
     Word(i16),
