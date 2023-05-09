@@ -12,6 +12,19 @@ pub enum Choice<T, U> {
     Some(T),
     Other(U),
 }
+impl<T: std::fmt::Display, U: std::fmt::Display> std::fmt::Display for Choice<T, U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Choice::Some(t) => write!(f, "{}", t),
+            Choice::Other(u) => write!(f, "{}", u),
+        }
+    }
+}
+impl<T: std::fmt::Display, U: std::fmt::Display> std::fmt::Debug for Choice<T, U> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
 
 pub struct BudExpander {}
 impl BudExpander {
@@ -24,7 +37,7 @@ impl BudExpander {
             (
                 TypeType::Id("i8".to_owned()),
                 Type {
-                    size: 1,
+                    size: Choice::Some(1),
                     typtyp: TypeType::Id("i8".to_owned()),
                     magic: true,
                 },
@@ -32,7 +45,7 @@ impl BudExpander {
             (
                 TypeType::Id("i16".to_owned()),
                 Type {
-                    size: 2,
+                    size: Choice::Some(2),
                     typtyp: TypeType::Id("i16".to_owned()),
                     magic: true,
                 },
@@ -40,7 +53,7 @@ impl BudExpander {
             (
                 TypeType::Id("i32".to_owned()),
                 Type {
-                    size: 4,
+                    size: Choice::Some(4),
                     typtyp: TypeType::Id("i32".to_owned()),
                     magic: true,
                 },
@@ -217,7 +230,7 @@ impl BudExpander {
             });
         debug!("End types found");
         let mut num_errors = 0;
-        trace!("Funcs: {:?}", funcs.keys());
+        trace!("Funcs: {:?}", funcs.iter().map(|x| x.0.to_owned()).collect::<Vec<String>>());
         for (name, func) in funcs {
             match func.compile(0.., &environment) {
                 Ok(_) => {},
@@ -236,13 +249,29 @@ impl BudExpander {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Debug)]
+type TypeSize = Choice<u32, (u32, HashMap<String, (u32, TypeType)>)>;   // Choice<size, (size_of_struct, HashMap<field_name, (field_offset, field_type)>)>
+
+// #[derive(Eq, PartialEq, Debug)]
 enum TypeSizeState {
     NotCalculated,
     BeingCalculated,
-    Calculated(u32),
+    Calculated(TypeSize),
 }
-#[derive(Hash, Eq, PartialEq)]
+impl std::fmt::Debug for TypeSizeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            TypeSizeState::NotCalculated => "NotCalculated".to_owned(),
+            TypeSizeState::BeingCalculated => "BeingCalculated".to_owned(),
+            TypeSizeState::Calculated(size) => {
+                match size {
+                    Choice::Some(size) => size.to_string(),
+                    Choice::Other((size, _)) => size.to_string(),
+                }
+            }
+        })
+    }
+}
+// #[derive(Hash, Eq, PartialEq)]
 struct TypeSizeGenerator {
     typtyp: TypeType,
     state: TypeSizeState,
@@ -262,19 +291,21 @@ impl TypeSizeGenerator {
     fn from_type(typ: &Type) -> TypeSizeGenerator {
         TypeSizeGenerator {
             typtyp: typ.typtyp.clone(),
-            state: TypeSizeState::Calculated(typ.size),
+            state: TypeSizeState::Calculated(typ.size.clone()),
         }
     }
     fn get_size(
         size_generators: &mut HashMap<TypeType, TypeSizeGenerator>,
         index: TypeType,
         top: TypeType,
-    ) -> Result<u32, String> {
+    ) -> Result<TypeSize, String> {
         match size_generators.get_mut(&index) {
             Some(TypeSizeGenerator {
                 state: TypeSizeState::Calculated(size),
                 typtyp: _,
-            }) => Ok(*size),
+            }) => Ok(
+                size.clone()
+            ),
             Some(TypeSizeGenerator {
                 state: TypeSizeState::BeingCalculated,
                 typtyp: _,
@@ -288,41 +319,54 @@ impl TypeSizeGenerator {
                         let subtyp_clone = (&**subtyp).clone();
                         Self::get_size(size_generators, subtyp_clone, top)?;
                         size_generators.get_mut(&index).unwrap().state =
-                            TypeSizeState::Calculated(BudExpander::REG_SIZE);
-                        Ok(BudExpander::REG_SIZE)
+                            TypeSizeState::Calculated(Choice::Some(BudExpander::REG_SIZE));
+                        Ok(Choice::Some(BudExpander::REG_SIZE))
                     }
                     TypeType::Array(subtyp, len) => {
                         let subtyp_clone = (&**subtyp).clone();
                         let len = *len;
                         trace!("Getting size for array type {}", subtyp);
-                        let subsize = Self::get_size(size_generators, subtyp_clone, top)?;
+                        let (Choice::Some(subsize) | Choice::Other((subsize, _))) = Self::get_size(size_generators, subtyp_clone, top)?;
                         size_generators.get_mut(&index).unwrap().state =
-                            TypeSizeState::Calculated(subsize * len as u32);
-                        Ok(subsize * len as u32)
+                            TypeSizeState::Calculated(Choice::Some(subsize * len as u32));
+                        Ok(Choice::Some(subsize * len as u32))
                     }
                     TypeType::Id(name) => {
                         // Must be a built-in type
                         Err(format!("Built-in types must have their sizes predefined, but type {} did not have a defined size", name))
                     }
                     TypeType::Struct(_, Some(fields)) => {
+                        let fields = fields.clone();
                         let sizes = fields
                             .iter()
-                            .map(|tt| tt.clone())
-                            .collect::<Vec<TypeType>>()
+                            .map(|field| field.clone())
+                            .collect::<Vec<Field>>()
                             .into_iter()
-                            .map(|tt| {
+                            .map(|field| {
                                 size_generators.get_mut(&index).unwrap().state =
                                     TypeSizeState::BeingCalculated;                                         // This line is really
                                 // generator.state = TypeSizeState::BeingCalculated;                        // this line
-                                let size = Self::get_size(size_generators, tt, top.clone())?;   // I had to change it for the borrow checker
+                                let size = Self::get_size(size_generators, field.tt, top.clone())?;   // I had to change it for the borrow checker
                                 size_generators.get_mut(&index).unwrap().state =
-                                    TypeSizeState::Calculated(size);                                        // And this line is really
+                                    TypeSizeState::Calculated(size.clone());                                // And this line is really
                                 // generator.state = TypeSizeState::Calculated(size);                       // this line
+                                let (Choice::Some(size) | Choice::Other((size, _))) = size;
                                 Ok(size)
                             })
                             .collect::<Result<Vec<u32>, String>>()?;
-                        let (_, size) = Environment::get_struct_layout_from_sizes(&sizes);
-                        Ok(size)
+                        let (layout, size) = Environment::get_struct_layout_from_sizes(&sizes);
+                        let fields = fields
+                            .iter()
+                            .zip(layout)
+                            .map(|(field, off)| (
+                                field.name.to_owned(),
+                                (
+                                    off,
+                                    field.tt.clone(),
+                                )
+                            ))
+                            .collect();
+                        Ok(Choice::Other((size, fields)))
                     }
                     TypeType::Struct(name, None) => Err(format!(
                         "Struct {} not initialized with fields before calling get_size on type {}",
@@ -346,7 +390,7 @@ impl Environment {
         structs: Vec<(String, Vec<VarDecl>)>,
         mut built_in: HashMap<TypeType, Type>,
         funcs: Vec<(VarDecl, Vec<VarDecl>, Box<Expr>)>,
-    ) -> Result<(Environment, HashMap<String, Function>), String> {
+    ) -> Result<(Environment, Vec<(String, Function)>), String> {
         debug!("Types:");
         // Get the names (TypeTypes) for all types so that
         // Type objects can be created later
@@ -367,9 +411,10 @@ impl Environment {
                         .map(|vd| {
                             let tt = TypeType::from_te(vd.typ.clone(), &struct_names, &built_in)?;
                             struct_fields.push(tt.clone());
-                            Ok(tt)
+                            let field = Field { name: name.to_owned(), tt };
+                            Ok(field)
                         })
-                        .collect::<Result<Vec<TypeType>, String>>()?,
+                        .collect::<Result<Vec<Field>, String>>()?,
                 ),
             ));
         }
@@ -454,7 +499,7 @@ impl Environment {
                     Function::new(name, args, expr, &env)?
                 ))
             })
-            .collect::<Result<HashMap<String, Function>, String>>()?;
+            .collect::<Result<Vec<(String, Function)>, String>>()?;
 
         debug!("End types");
         Ok((env, funcs))
@@ -491,20 +536,20 @@ pub struct CompiledEnvironment {
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct Field {
-    pub typ: TypeType,
+    pub tt: TypeType,
     pub name: String,
 }
 impl Field {
     pub fn new(vd: VarDecl, environment: &Environment) -> Field {
         Field {
-            typ: TypeType::new(vd.typ, environment),
+            tt: TypeType::new(vd.typ, environment),
             name: vd.id,
         }
     }
 }
 impl std::fmt::Display for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.typ, self.name)
+        write!(f, "{} {}", self.tt, self.name)
     }
 }
 
@@ -522,20 +567,29 @@ pub struct StructLayout {
 // Only one Type object will exist for each unique type
 #[derive(Eq, PartialEq)]
 pub struct Type {
-    pub size: u32,
+    pub size: TypeSize,
     pub typtyp: TypeType,
     magic: bool,
 }
-impl Type {}
+impl Type {
+    pub fn get_size(&self) -> u32 {
+        match self.size {
+            Choice::Some(size) | Choice::Other((size, _)) => size
+        }
+    }
+}
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<{}, {}{}>", self.typtyp.to_string(), self.size, if self.magic { ", magic" } else { "" })
+        write!(f, "<{}, {}{}>", self.typtyp.to_string(), match self.size {
+            Choice::Some(size) => size.to_string(),
+            Choice::Other((size, _)) => size.to_string(),
+        }, if self.magic { ", magic" } else { "" })
     }
 }
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub enum TypeType {
-    Struct(String, Option<Vec<TypeType>>),
+    Struct(String, Option<Vec<Field>>),
     Pointer(Box<TypeType>),
     Array(Box<TypeType>, i32),
     Id(String),
@@ -590,6 +644,21 @@ impl TypeType {
             TypeExpr::Pointer(typ) => TypeType::Pointer(
                 Box::new(TypeType::new(*typ, environment))
             ),
+        }
+    }
+    pub fn get_size(&self, env: &Environment) -> u32 {
+        match env.types.get(self).unwrap().size {
+            Choice::Some(size) | Choice::Other((size, _)) => size
+        }
+    }
+    // Returns None if the size is not a Byte, Word, or LWord
+    pub fn get_data_size(&self, env: &Environment) -> Option<DataSize> {
+        let size = self.get_size(env);
+        match size {
+            1 => Some(DataSize::Byte),
+            2 => Some(DataSize::Word),
+            4 => Some(DataSize::LWord),
+            _ => None,
         }
     }
     fn to_string(&self) -> String {
@@ -657,6 +726,11 @@ impl std::fmt::Display for TypeType {
         write!(f, "<{}>", self.to_string())
     }
 }
+impl std::fmt::Debug for TypeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
 
 #[derive(Clone)]
 pub struct Signature {
@@ -672,54 +746,279 @@ impl FunctionEnvironment {
 
 }
 
+type ATemp = usize;
+type DTemp = usize;
+
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub enum Place {
     Var(Field),
-    AReg(AReg, TypeType),
-    DReg(DReg, TypeType),
-    Ref(Box<Place>, Choice<Box<Place>, i32>),    // (location of the pointer, offset)
+    // ATemp is like diet Ref
+    ATemp(ATemp, TypeType),
+    DTemp(DTemp, TypeType), // RetReg is DTemp(0, _)
+    Ref(ATemp, Option<DTemp>, i32, TypeType),   // (location of the pointer, optional data offset, offset, typetype pointed to)
+                                                // When compiling Ref Places, move the reference into the reference register, A0,
+                                                // if it is not already in an address register
+                                                // and move the offset into an offset register, D1, (if it is not already in a data register)
+                                                // Then dereference it using (a0, d1, lit), moving it into the destination. 
+                                                // If the dereference is being assigned, then check if the expression doing the 
+                                                // assigning uses the reference register. If it does, save the reference register
+                                                // on the stack before evaluating the expression. You do not need to save the offset 
+                                                // register (it may even already be on the stack), but move it into a data register
+                                                // before moving into this reference using (a0, d1, lit)
 }
 impl Place {
     pub fn get_type(&self) -> TypeType {
         match self {
             Place::Var(f) => {
-                f.typ.clone()
+                f.tt.clone()
             }
-            Place::AReg(_, tt) => {
+            Place::ATemp(_, tt) => {
+                TypeType::Pointer(Box::new(tt.clone()))
+            }
+            Place::DTemp(_, tt) => {
                 tt.clone()
             }
-            Place::DReg(_, tt) => {
-                tt.clone()
-            }
-            Place::Ref(place, _) => {
-                place.get_type()
+            Place::Ref(_, _, _, tt) => {
+                TypeType::Pointer(Box::new(tt.clone()))
             }
         }
     }
     pub fn get_size(&self, env: &Environment) -> u32 {
-        env.types.get(&self.get_type()).unwrap().size
+        match env.types.get(&self.get_type()).unwrap().size {
+            Choice::Some(size) | Choice::Other((size, _)) => size
+        }
     }
     // Returns None if the size is not a Byte, Word, or LWord
     pub fn get_data_size(&self, env: &Environment) -> Option<DataSize> {
         let size = self.get_size(env);
         match size {
-            8 => Some(DataSize::Byte),
-            16 => Some(DataSize::Word),
-            32 => Some(DataSize::LWord),
+            1 => Some(DataSize::Byte),
+            2 => Some(DataSize::Word),
+            4 => Some(DataSize::LWord),
             _ => None,
         }
+    }
+    fn d_to_a(d: DTemp, tt: TypeType, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<ATemp, String> {
+        let size = match tt.get_data_size(env) {
+            Some(size) => size,
+            None => { return Err(format!("DTemp {} containing large value", d)); },
+        };
+        let a = fienv.get_addr_temp(env)?;
+        let d_place = Place::DTemp(d, tt.clone());
+        let a_place = Place::ATemp(a, tt);
+        let instr = InterInstr::Move(size, d_place, a_place);
+        instrs.push(instr);
+        fienv.free_data_temp(d);
+        Ok(a)
+    }
+    /// Calculates the Place: `self[d+off]`
+    /// This function consumes this place (frees it) and returns a Ref that you must free
+    /// (unless it is an array or struct stored in DTemp or RetReg--then this function returns that DTemp
+    /// shifted the right amount)
+    /// 
+    /// If `self.is_struct()`, then off should be the index of the argument in this struct's layout. 
+    /// Otherwise, off should be the number of indices to advance (not multiplied by the size of the item).
+    /// 
+    /// If `self.is_array() || self.is_struct()`, then 
+    /// * **If this Place is DTemp, it shifts the DTemp the correct number of places and changes its type, then returns it**
+    /// * If this Place is ATemp, it returns it as a Ref
+    /// * If this Place is Var, it moves the location of the Var to an ATemp and returns the ATemp as a Ref
+    /// * **If this Place is Ref, it shifts the Ref the correct number of spots. This may involve adding the given dtemp to 
+    ///   the one already in this Ref and will involve adding the given off to the one already in this Ref**
+    /// * **If this Place is RetReg, it shifts it as it does with DTemp**
+    /// 
+    /// If `!(self.is_array() || self.is_struct())`, then 
+    /// * **If this Place is DTemp, it moves the DTemp into an ATemp and returns that ATemp as a Ref**
+    /// * If this Place is ATemp, it returns it as a Ref
+    /// * If this Place is Var, it moves the location of the Var to an ATemp and returns the ATemp as a Ref
+    /// * **If this Place is Ref, it moves the thing this Ref points to into an ATemp and returns the ATemp as a Ref**
+    /// * **If this Place is RetReg, it moves it into an ATemp and returns that ATemp as a Ref**
+    /// 
+    /// If the type of this Place is not indexable, this function will return an Err
+    pub fn index_into(self, d: Option<DTemp>, mut off: i32, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
+        let tt;
+        let mut is_array = None;
+        let mut is_struct = false;
+        match self.get_type() {
+            TypeType::Array(tt_, len_) => {
+                tt = *tt_;
+                is_array = Some(len_);
+            }
+            TypeType::Id(name) => {
+                return Err(format!("Cannot index into type {}", name));
+            }
+            TypeType::Pointer(tt_) => { tt = *tt_; },
+            TypeType::Struct(name, Some(fields)) => {
+                // This is a very bad way of doing it
+                // Right now, this function receives a field index, gets the name
+                // of the field from the Struct TypeType, and gets the absolute offset
+                // from the Struct Type from the Environment. 
+                // Either the struct layout should be stored in the Struct TypeType 
+                // or this function should receive the name of the field
+                // or this function should receive an absolute offset and a return TypeType.
+                if off as usize >= fields.len() {
+                    return Err(format!("Invalid field index {} for struct {}", off, name));
+                }
+                let f_name = &fields[off as usize].name;
+                let tt_ = fields[off as usize].tt.clone();
+                let s_tt = self.get_type();
+                let size = match env.types.get(&s_tt) {
+                    Some(t) => t.size.clone(),
+                    None => { return Err(format!("Struct type not found in environment: {}", name)); },
+                };
+                if let Choice::Other((_, layout)) = size {
+                    off = match layout.get(f_name) {
+                        Some((off, _)) => *off as i32,
+                        None => { return Err(format!("Struct {} has no field {}", name, f_name)); },
+                    };
+                } else {
+                    return Err(format!("Struct {} did not have a layout", name));
+                }
+                is_struct = true;
+                tt = tt_;
+            }
+            TypeType::Struct(name, None) => {
+                return Err(format!("Struct {} not fully initialized with fields", name));
+            }
+        };
+        if !is_struct {
+            let size = tt.get_size(env);
+            match d {
+                Some(d) => {
+                    let size = Imm::LWord(size as i32);
+                    let d_place = Place::DTemp(d, TypeType::Id("i32".to_owned()));
+                    let instr = InterInstr::Binopi(size, BudBinop::Times, d_place);
+                    instrs.push(instr);
+                }
+                None => {}
+            }
+            off *= size as i32;
+        }
+        match self {
+            Place::ATemp(atemp, _) => Ok(Place::Ref(atemp, d, off, tt.clone())),
+            Place::DTemp(d_, _) => {
+                if is_struct || is_array != None {
+                    if let Some(d) = d {
+                        let d_place = Place::DTemp(d, TypeType::Id("i32".to_owned()));
+                        let instr = InterInstr::Binopi(Imm::Word(8), BudBinop::Times, d_place);
+                        instrs.push(instr);
+                        let instr = InterInstr::Lsr(d, d_);
+                        instrs.push(instr);
+                    } else if let Some(len) = is_array {
+                        if off >= len {
+                            warn!("Array has length {} but is being indexed with literal {}", len, off);
+                        }
+                    }
+                    if off != 0 {
+                        off *= 8;
+                        let instr = InterInstr::Lsri(Imm::LWord(off), d_);
+                        instrs.push(instr);
+                    }
+                    Ok(Place::DTemp(d_, tt))
+                } else {
+                    Ok(Place::Ref(Self::d_to_a(d_, tt.clone(), instrs, fienv, env)?, d, off, tt.clone()))
+                }
+            },
+            Place::Ref(a, mut d_, off_, _) => {
+                if is_struct || is_array != None {
+                    // Shift this Ref by the amount given
+                    if let Some(d) = d {
+                        if let Some(d_) = d_ {
+                            let d_place_ = Place::DTemp(d_, TypeType::Id("i32".to_owned()));
+                            let d_place = Place::DTemp(d, TypeType::Id("i32".to_owned()));
+                            let size = DataSize::LWord;
+                            let instr = InterInstr::Binop(size, d_place, BudBinop::Plus, d_place_);
+                            instrs.push(instr);
+                        } else {
+                            d_ = Some(d);
+                        }
+                    }
+                    off += off_;
+                    Ok(Place::Ref(a, d_, off, tt))
+                } else {
+                    // We actually want to index into the thing this Ref is pointing to
+                    // which must be a pointer, since !(is_struct || is_array)
+                    let a_place = Place::ATemp(a, tt.clone());
+                    let size = DataSize::LWord;
+                    let instr = InterInstr::Move(size, self, a_place);
+                    instrs.push(instr);
+                    Ok(Place::Ref(a, d, off, tt))
+                }
+            }
+            Place::Var(Field { name, tt: _ }) => {
+                let a = fienv.get_addr_temp(env)?;
+                let a_place = Place::ATemp(a, tt.clone());
+                let instr = InterInstr::MoVA(name, a_place);
+                instrs.push(instr);
+                Ok(Place::Ref(a, d, off, tt))
+            }
+        }
+    }
+    pub fn free(&self, fienv: &mut FunctionInterEnvironment) {
+        match self {
+            Place::ATemp(a, _) => fienv.free_addr_temp(*a),
+            Place::DTemp(d, _) => fienv.free_data_temp(*d),
+            Place::Ref(a, d, _, _) => {
+                fienv.free_addr_temp(*a);
+                if let Some(d) = d {
+                    fienv.free_data_temp(*d);
+                }
+            }
+            Place::Var(_) => {}
+        }
+    }
+    fn is_magic(&self, env: &Environment) -> bool {
+        let tt = self.get_type();
+        match env.types.get(&tt) {
+            Some(t) => t.magic,
+            None => {
+                error!("Type {} not found in env.types", tt);
+                panic!()
+            }
+        }
+    }
+    fn is_struct(&self) -> bool {
+        if let TypeType::Struct(_, _) = self.get_type() {
+            true
+        } else {
+            false
+        }
+    }
+    fn is_pointer(&self) -> bool {
+        if let TypeType::Pointer(_) = self.get_type() {
+            true
+        } else {
+            false
+        }
+    }
+    fn is_array(&self) -> bool {
+        if let TypeType::Array(_, _) = self.get_type() {
+            true
+        } else {
+            false
+        }
+    }
+    fn is_id(&self) -> bool {
+        if let TypeType::Id(_) = self.get_type() {
+            true
+        } else {
+            false
+        }
+    }
+    fn is_void(&self) -> bool {
+        self.get_type() == TypeType::Id("void".to_owned())
     }
 }
 impl std::fmt::Display for Place {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", match self {
             Place::Var(field) => field.to_string(),
-            Place::AReg(areg, tt) => format!("{} {}", tt, areg),
-            Place::DReg(dreg, tt) => format!("{} {}", tt, dreg),
-            Place::Ref(place, offset) => {
-                match offset {
-                    Choice::Some(off_place) => format!("{}[{}]", place, off_place),
-                    Choice::Other(lit) => format!("{}[{}]", place, lit),
+            Place::ATemp(atemp, tt) => format!("{} A{}", tt, atemp),
+            Place::DTemp(dtemp, tt) => format!("{} D{}", tt, dtemp),
+            Place::Ref(a, d, offset, tt) => {
+                match d {
+                    Some(d) =>  format!("{} A{}[D{}+{}]", tt, a, d, offset),
+                    None =>     format!("{} A{}[{}]",     tt, a, offset),
                 }
             },
         })
@@ -736,6 +1035,7 @@ impl std::fmt::Debug for Place {
 pub enum ReturnPlan {
     Binop(BudBinop, Place), // Place must have a magic type
     Move(Place),
+    Push(TypeType),
     None,
 }
 impl ReturnPlan {
@@ -754,6 +1054,7 @@ impl ReturnPlan {
                 Ok(Some(vec![instr]))
             }
             ReturnPlan::Move(to) => Ok(Some(InterInstr::move_mem(from, to, env))),
+            ReturnPlan::Push(tt) => Ok(Some(InterInstr::push_mem(from, tt, env))),
             ReturnPlan::None => Ok(None),
         }
     }
@@ -768,6 +1069,10 @@ impl ReturnPlan {
             ReturnPlan::Move(to) => {
                 let size = Self::get_imm_size(&from, &to, env)?;
                 let instr = InterInstr::Movi(from.change_size(size), to);
+                Ok(Some(instr))
+            }
+            ReturnPlan::Push(tt) => {
+                let instr = InterInstr::Pushi(from, tt);
                 Ok(Some(instr))
             }
             ReturnPlan::None => Ok(None),
@@ -792,10 +1097,15 @@ pub enum InterInstr {
     Binopi(Imm, BudBinop, Place),
     Move(DataSize, Place, Place),
     Movi(Imm, Place),
+    MoVA(String, Place),    // Move Var Address
+    Push(Place),
+    Pushi(Imm, TypeType),
     MoveSP(i32),    // for calling functions
     Call(String),
     Lbl(usize),
     Goto(usize),
+    Lsr(DTemp, DTemp),
+    Lsri(Imm, DTemp),
     Bcc(usize),
     Bcs(usize),
     Beq(usize),
@@ -819,123 +1129,80 @@ impl InterInstr {
         }
 
     }
+    pub fn push_mem(from: Place, tt: TypeType, env: &Environment) -> Vec<InterInstr> {
+        todo!()
+    }
 }
 
 pub struct FunctionInterEnvironment {
     pub vars: HashMap<String, (Field, bool)>,
-    pub dregs: [(DReg, bool); 8],
-    pub aregs: [(AReg, bool); 8],
+    // dtemps and atemps can only hold variables up to 4 bytes
+    // Variables greater than 4 bytes must be stored in vars.
+    // They cannot be returned from expressions (until that is 
+    // implemented) except to be pushed onto the stack. But
+    // Move operations between reference Places move to or 
+    // from the thing pointed to and can move large values (>4 bytes). 
+    pub dtemps: Vec<bool>,
+    pub atemps: Vec<bool>,
 }
-// Places are variables (local and temp) and register
 impl FunctionInterEnvironment {
-    pub fn new(args: &Vec<Field>, d0_used: bool) -> FunctionInterEnvironment {
+    pub fn new(args: &Vec<Field>) -> FunctionInterEnvironment {
         FunctionInterEnvironment {
             vars: args
                 .iter()
                 .map(|f| (f.name.clone(), (f.clone(), true)))
                 .collect(),
-            dregs: [
-                (D0, d0_used),
-                (D1, false),
-                (D2, false),
-                (D3, false),
-                (D4, false),
-                (D5, false),
-                (D6, false),
-                (D7, false),
-            ],
-            aregs: [
-                (A0, false),
-                (A1, false),
-                (A2, false),
-                (A3, false),
-                (A4, false),
-                (A5, false),
-                (A6, false),
-                (SP, true),
-            ]
+            dtemps: Vec::new(),
+            atemps: Vec::new(),
         }
     }
     pub fn var_name_from_temp(temp: usize) -> String {
         format!("[t{}]", temp)
     }
-    fn _get_temp(&mut self, tt: TypeType) -> Place {
-        for temp in 0.. {
-            let name = Self::var_name_from_temp(temp);
-            match self.vars.get_mut(&name.clone()) {
-                Some((f, used)) => {
-                    if !*used {
-                        // Variables cannot change type in the middle of the program
-                        if f.typ == tt {
-                            *used = true;
-                            return Place::Var(f.clone());
-                        } else {
-                            let f_clone = f.clone();
-                            self.vars.insert(name.clone(), (Field{ typ: tt, name: name.clone() }, true));
-                            return Place::Var(f_clone);
-                        }
-                    }
-                },
-                None => {
-                    self.vars.insert(name.clone(), (Field{ typ: tt.clone(), name: name.clone() }, true));
-                    return Place::Var(Field { name, typ: tt });
-                }
-            }
-        }
-        panic!("Iterator 0.. had 0 elements??")
-    }
-    // Temp variables are stored in vars like "[t0]"
-    pub fn get_data_place(&mut self, tt: TypeType, env: &Environment) -> Place {
-        // If the requested Place could fit in a register
+    // Data temps are stored in dtemps
+    pub fn get_data_temp(&mut self, tt: TypeType, env: &Environment) -> Result<usize, String> {
         let size = match env.types.get(&tt) {
-            Some(typ) => typ.size,
-            None => panic!("Invalid typetype found: {}", tt),
+            Some(typ) => typ.get_size(),
+            None => return Err(format!("Invalid typetype found: {}", tt)),
         };
         if size <= BudExpander::REG_SIZE {
-            // If a data register is available, give it out
-            for (dreg, used) in &mut self.dregs {
+            // If a data temp is available, give it out
+            for (temp, used) in self.dtemps.iter_mut().enumerate() {
                 if !*used {
                     *used = true;
-                    return Place::DReg(*dreg, tt);
+                    return Ok(temp);
                 }
             }
+            let place = self.dtemps.len();
+            self.dtemps.push(true);
+            Ok(place)
+        } else {
+            Err(format!("Cannot create data temp for large type {}", tt))
         }
-        // Else, see if a temporary variable is available
-        self._get_temp(tt)
     }
-    pub fn get_addr_place(&mut self, tt: TypeType, env: &Environment) -> Place {
-        // If the requested Place could fit in a register
-        let size = match env.types.get(&tt) {
-            Some(typ) => typ.size,
-            None => panic!("Invalid typetype found: {}", tt),
-        };
-        if size <= BudExpander::REG_SIZE {
-            // If a addr register is available, give it out
-            for (areg, used) in &mut self.aregs {
-                if !*used {
-                    *used = true;
-                    return Place::AReg(*areg, tt);
-                }
+    // Addr temps can point to anything
+    pub fn get_addr_temp(&mut self, env: &Environment) -> Result<usize, String> {
+        // If a addr temp is available, give it out
+        for (temp, used) in self.atemps.iter_mut().enumerate() {
+            if !*used {
+                *used = true;
+                return Ok(temp);
             }
         }
-        // Else, see if a temporary variable is available
-        self._get_temp(tt)
+        let place = self.atemps.len();
+        self.atemps.push(true);
+        Ok(place)
     }
-    pub fn free_place(&mut self, place: &Place) {
-        match place {
-            Place::Var(id) => {
-                if let Some((_, used)) = self.vars.get_mut(&id.name) {
-                    *used = false;
-                }
-            },
-            Place::AReg(a, _) => {
-                self.aregs[*a as usize].1 = false;
-            },
-            Place::DReg(d, _) => {
-                self.dregs[*d as usize].1 = false;
-            },
-            Place::Ref(_, _) => {},
+    fn _free_temp(temps: &mut Vec<bool>, temp: usize) {
+        if temp < temps.len() {
+            temps[temp] = false;
         }
+    }
+    pub fn free_data_temp(&mut self, dtemp: DTemp) {
+        Self::_free_temp(&mut self.dtemps, dtemp)
+    }
+    pub fn free_addr_temp(&mut self, atemp: ATemp) {
+        Self::_free_temp(&mut self.atemps, atemp)
     }
     // Saves all used regs by pushing them to the stack
     pub fn save_regs(instrs: &mut Vec<InterInstr>) -> Vec<ADReg> {
@@ -976,14 +1243,14 @@ impl Function {
     }
     pub fn compile(self, mut label_gen: RangeFrom<usize>, env: &Environment) -> Result<CompiledFunction, String> {
         let mut instrs = Vec::new();
-        let mut fienv = FunctionInterEnvironment::new(&self.signature.args, false);
+        let mut fienv = FunctionInterEnvironment::new(&self.signature.args);
         let plan;
-        if self.signature.name.typ.is_void() {
+        if self.signature.name.tt.is_void() {
             plan = ReturnPlan::None;
-        } else if self.signature.name.typ.is_array() || self.signature.name.typ.is_struct() {
-            todo!("Implement returning arrays and structs from functions")
+        } else if self.signature.name.tt.is_array() || self.signature.name.tt.is_struct() {
+            return Err(format!("Returning arrays and structs from functions not implemented. Pass a pointer to a local variable as an argument instead."));
         } else {
-            plan = ReturnPlan::Move(Place::DReg(D0, self.signature.name.typ));
+            plan = ReturnPlan::Move(Place::DTemp(0, self.signature.name.tt.clone()));
         }
         Self::compile_expr(
             self.expr,
@@ -1020,14 +1287,16 @@ impl Function {
                         // Make the temporary variable with the same type as the ReturnPlan
                         // As a future optimization, we do not need to get a new place if
                         // both binops are the same and if the binop is associative
-                        let temp = fienv.get_data_place(place.get_type(), env);
-                        let plan = ReturnPlan::Move(temp.clone());
+                        let tt = place.get_type();
+                        let temp = fienv.get_data_temp(tt.clone(), env)?;
+                        let t_place = Place::DTemp(temp, tt);
+                        let plan = ReturnPlan::Move(t_place.clone());
                         Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
-                        let plan = ReturnPlan::Binop(b, temp.clone());
+                        let plan = ReturnPlan::Binop(b, t_place.clone());
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
                         let ret_action = ReturnPlan::Binop(pb, place)
-                            .into_inter_instr(temp.clone(), env)?;
-                        fienv.free_place(&temp);
+                            .into_inter_instr(t_place.clone(), env)?;
+                        fienv.free_data_temp(temp);
                         match ret_action {
                             Some(mut ret_instrs) => instrs.append(&mut ret_instrs),
                             None => {},
@@ -1039,10 +1308,21 @@ impl Function {
                         let plan = ReturnPlan::Binop(b, place);
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
                     },
+                    ReturnPlan::Push(tt) => {
+                        let temp = fienv.get_data_temp(tt.clone(), env)?;
+                        let t_place = Place::DTemp(temp, tt);
+                        let plan = ReturnPlan::Move(t_place.clone());
+                        Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
+                        let plan = ReturnPlan::Binop(b, t_place.clone());
+                        Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
+                        let instr = InterInstr::Push(t_place);
+                        fienv.free_data_temp(temp);
+                        instrs.push(instr);
+                    },
                     ReturnPlan::None => {
                         Self::compile_non_bin_expr(*nbe, plan.clone(), instrs, label_gen, fienv, env)?;
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
-                    }
+                    },
                 }
 
             },
@@ -1056,22 +1336,22 @@ impl Function {
         match nbe {
             NonBinExpr::BlockExpr(exprs)        => Self::compile_block_expr(exprs, plan, instrs, label_gen, fienv, env)?,
             NonBinExpr::AssignExpr(id, expr)    => Self::compile_assign_expr(*id, *expr, plan, instrs, label_gen, fienv, env)?,
-            NonBinExpr::VarDeclAssgn(_, _)  => warn!("Not implemented"),
-            NonBinExpr::ReturnExpr(_)       => warn!("Not implemented"),
-            NonBinExpr::CleanupCall         => warn!("Not implemented"),
-            NonBinExpr::CleanupExpr(_)      => warn!("Not implemented"),
-            NonBinExpr::IdExpr(_)           => warn!("Not implemented"),
-            NonBinExpr::LitExpr(_)          => warn!("Not implemented"),
-            NonBinExpr::ParenExpr(_)        => warn!("Not implemented"),
-            NonBinExpr::UnaryExpr(_, _)     => warn!("Not implemented"),
-            NonBinExpr::IfExpr(_, _)        => warn!("Not implemented"),
-            NonBinExpr::IfElse(_, _, _)     => warn!("Not implemented"),
-            NonBinExpr::UnlExpr(_, _)       => warn!("Not implemented"),
-            NonBinExpr::UnlElse(_, _, _)    => warn!("Not implemented"),
-            NonBinExpr::WhileExpr(_, _)     => warn!("Not implemented"),
-            NonBinExpr::DoWhile(_, _)       => warn!("Not implemented"),
-            NonBinExpr::Break               => warn!("Not implemented"),
-            NonBinExpr::Continue            => warn!("Not implemented"),
+            NonBinExpr::VarDeclAssgn(_, _)  => warn!("Not implemented: VarDeclAssgn"),
+            NonBinExpr::ReturnExpr(_)       => warn!("Not implemented: ReturnExpr"),
+            NonBinExpr::CleanupCall         => warn!("Not implemented: CleanupCall"),
+            NonBinExpr::CleanupExpr(_)      => warn!("Not implemented: CleanupExpr"),
+            NonBinExpr::IdExpr(_)           => warn!("Not implemented: IdExpr"),
+            NonBinExpr::LitExpr(_)          => warn!("Not implemented: LitExpr"),
+            NonBinExpr::ParenExpr(_)        => warn!("Not implemented: ParenExpr"),
+            NonBinExpr::UnaryExpr(_, _)     => warn!("Not implemented: UnaryExpr"),
+            NonBinExpr::IfExpr(_, _)        => warn!("Not implemented: IfExpr"),
+            NonBinExpr::IfElse(_, _, _)     => warn!("Not implemented: IfElse"),
+            NonBinExpr::UnlExpr(_, _)       => warn!("Not implemented: UnlExpr"),
+            NonBinExpr::UnlElse(_, _, _)    => warn!("Not implemented: UnlElse"),
+            NonBinExpr::WhileExpr(_, _)     => warn!("Not implemented: WhileExpr"),
+            NonBinExpr::DoWhile(_, _)       => warn!("Not implemented: DoWhile"),
+            NonBinExpr::Break               => warn!("Not implemented: Break"),
+            NonBinExpr::Continue            => warn!("Not implemented: Continue"),
         }
         Ok(())
     }
@@ -1090,6 +1370,9 @@ impl Function {
                             ReturnPlan::Move(place) => {
                                 return Err(format!("Empty block expression but expected to move result to {}", place));
                             }
+                            ReturnPlan::Push(tt) => {
+                                return Err(format!("Empty block expression but expected to push result of type {}", tt));
+                            }
                         }
                     },
                 };
@@ -1104,24 +1387,27 @@ impl Function {
     }
     pub fn compile_assign_expr(id: IdExpr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         // Check that the variable exists
-        let (place, to_free) = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
+        let place = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
         let assign_plan = ReturnPlan::Move(place.clone());
         Self::compile_expr(expr, assign_plan, instrs, label_gen, fienv, env)?;
-        for tf in to_free {
-            fienv.free_place(&tf);
-        }
-        plan.into_inter_instr(place, env)?;
+        match plan.into_inter_instr(place.clone(), env)? {
+            Some(mut plan_instrs) => instrs.append(&mut plan_instrs),
+            None => {}
+        };
+        place.free(fienv);
         Ok(())
     }
     // (id place, places of calculated offsets if any)
-    pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(Place, Vec<Place>), String> {
+    // Calculates the Place for assigning to an IdExpr
+    // If the Place is a Ref, you must free the ATemp and Option<DTemp> stored in it.
+    pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
         match id {
             IdExpr::SquareIndex(id, offset) => {
                 // The id must be assignable
                 match *id.bin_expr {
                     BinExpr::NonBin(nbe) => {
                         if let NonBinExpr::IdExpr(id_expr) = *nbe {
-                            let (id_place, mut to_free) = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
+                            let id_place = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
                             // Check if the offset is a literal value
                             let mut lit = None;
                             if let BinExpr::NonBin(nbe) = &*offset.bin_expr {
@@ -1131,16 +1417,17 @@ impl Function {
                             }
                             match lit {
                                 Some(num) => {
-                                    let place = Place::Ref(Box::new(id_place), Choice::Other(num));
-                                    return Ok((place, to_free));
+                                    let place = id_place.index_into(None, num, instrs, fienv, env)?;
+                                    return Ok(place);
                                 }
                                 None => {
-                                    let off_place = fienv.get_data_place(TypeType::Id("i32".to_owned()), env);
-                                    to_free.push(off_place.clone());
+                                    let tt = TypeType::Id("i32".to_owned());
+                                    let off_temp = fienv.get_data_temp(tt.clone(), env)?;   // offset as an index (not multiplied by sizeof(T))
+                                    let off_place = Place::DTemp(off_temp, tt.clone());
                                     let plan = ReturnPlan::Move(off_place.clone());
                                     Self::compile_expr(*offset, plan, instrs, label_gen, fienv, env)?;
-                                    let place = Place::Ref(Box::new(id_place), Choice::Some(Box::new(off_place)));
-                                    return Ok((place, to_free));
+                                    let place = id_place.index_into(Some(off_temp), 0, instrs, fienv, env)?;
+                                    return Ok(place);
                                 }
                             }
                         }
@@ -1164,14 +1451,14 @@ impl Function {
                         return Err(format!("Undeclared variable {}", id));
                     }
                 };
-                Ok((place, Vec::new()))
+                Ok(place)
             },
             IdExpr::Reference(id_expr) => {
                 // We need to store the result of expr into the memory
                 // location pointed to by the variable, id
-                let (id_place, to_free) = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
-                let place = Place::Ref(Box::new(id_place), Choice::Other(0));
-                Ok((place, to_free))
+                let id_place = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
+                let place = id_place.index_into(None, 0, instrs, fienv, env)?;
+                Ok(place)
             },
         }
     }
