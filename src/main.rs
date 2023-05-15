@@ -183,6 +183,8 @@ fn main() {
             VarDeclAssgn,
             Expr,
             TypeExpr,
+            Sqr,
+            SqrExpr,
             Expr2,
             Exprs,
             NonBinExpr,

@@ -211,8 +211,8 @@ def read_action_table(lines, index):
         index += 1
         if index >= len(lines):
             return index
-        # symbols = lines[index].split("\t")[1:]
-        symbols = lines[index].split("\t")
+        symbols = lines[index].split("\t")[1:]
+        # symbols = lines[index].split("\t")
         index += 1
         if index >= len(lines):
             return index

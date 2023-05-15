@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::RangeFrom;
 
-use crate::bud::{BinExpr, Expr, NonBinExpr, TypeExpr, VarDecl, BudBinop, IdExpr, Literal};
+use crate::bud::{BinExpr, Expr, NonBinExpr, TypeExpr, VarDecl, BudBinop, IdExpr, Literal, BudUnop};
 use crate::logging::LoggingOptions;
 use crate::tools::ToStringCollection;
 use crate::{bud, parse::Node};
@@ -587,6 +587,8 @@ impl std::fmt::Display for Type {
     }
 }
 
+
+
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub enum TypeType {
     Struct(String, Option<Vec<Field>>),
@@ -617,10 +619,13 @@ impl TypeType {
                     Err(format!("Type {} not found in structs or built-ins", id))
                 }
             }
-            TypeExpr::Array(typ, size) => Ok(TypeType::Array(
-                Box::new(TypeType::from_te(*typ, struct_names, built_in)?),
-                size,
-            )),
+            TypeExpr::TypSqr(typ, sqr) => {
+                let mut typ = TypeType::from_te(*typ, struct_names, built_in)?;
+                for length in sqr {
+                    typ = TypeType::Array(Box::new(typ), length);
+                }
+                Ok(typ)
+            }
             TypeExpr::Pointer(typ) => Ok(TypeType::Pointer(Box::new(TypeType::from_te(
                 *typ,
                 struct_names,
@@ -637,10 +642,12 @@ impl TypeType {
                     TypeType::Id(id)
                 }
             },
-            TypeExpr::Array(typ, size) => TypeType::Array(
-                Box::new(TypeType::new(*typ, environment)),
-                size
-            ),
+            TypeExpr::TypSqr(typ, mut sqr) => {
+                match sqr.pop() {
+                    Some(size) => TypeType::Array(Box::new(TypeType::new(*typ, environment)), size),
+                    None => TypeType::new(*typ, environment)
+                }
+            }
             TypeExpr::Pointer(typ) => TypeType::Pointer(
                 Box::new(TypeType::new(*typ, environment))
             ),
@@ -813,26 +820,26 @@ impl Place {
     }
     /// Calculates the Place: `self[d+off]`
     /// This function consumes this place (frees it) and returns a Ref that you must free
-    /// (unless it is an array or struct stored in DTemp or RetReg--then this function returns that DTemp
+    /// (unless it is an array or struct stored in DTemp--then this function returns that DTemp
     /// shifted the right amount)
     /// 
     /// If `self.is_struct()`, then off should be the index of the argument in this struct's layout. 
     /// Otherwise, off should be the number of indices to advance (not multiplied by the size of the item).
+    /// 
+    /// If `self.is_array()` and `off >= ` length of `self`, then a warning will be printed.
     /// 
     /// If `self.is_array() || self.is_struct()`, then 
     /// * **If this Place is DTemp, it shifts the DTemp the correct number of places and changes its type, then returns it**
     /// * If this Place is ATemp, it returns it as a Ref
     /// * If this Place is Var, it moves the location of the Var to an ATemp and returns the ATemp as a Ref
     /// * **If this Place is Ref, it shifts the Ref the correct number of spots. This may involve adding the given dtemp to 
-    ///   the one already in this Ref and will involve adding the given off to the one already in this Ref**
-    /// * **If this Place is RetReg, it shifts it as it does with DTemp**
+    ///   the one already in this Ref and will involve adding the given offset to the one already in this Ref**
     /// 
     /// If `!(self.is_array() || self.is_struct())`, then 
     /// * **If this Place is DTemp, it moves the DTemp into an ATemp and returns that ATemp as a Ref**
     /// * If this Place is ATemp, it returns it as a Ref
     /// * If this Place is Var, it moves the location of the Var to an ATemp and returns the ATemp as a Ref
     /// * **If this Place is Ref, it moves the thing this Ref points to into an ATemp and returns the ATemp as a Ref**
-    /// * **If this Place is RetReg, it moves it into an ATemp and returns that ATemp as a Ref**
     /// 
     /// If the type of this Place is not indexable, this function will return an Err
     pub fn index_into(self, d: Option<DTemp>, mut off: i32, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
@@ -1334,26 +1341,25 @@ impl Function {
     }
     pub fn compile_non_bin_expr(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match nbe {
-            NonBinExpr::BlockExpr(exprs)        => Self::compile_block_expr(exprs, plan, instrs, label_gen, fienv, env)?,
-            NonBinExpr::AssignExpr(id, expr)    => Self::compile_assign_expr(*id, *expr, plan, instrs, label_gen, fienv, env)?,
-            NonBinExpr::VarDeclAssgn(_, _)  => warn!("Not implemented: VarDeclAssgn"),
-            NonBinExpr::ReturnExpr(_)       => warn!("Not implemented: ReturnExpr"),
-            NonBinExpr::CleanupCall         => warn!("Not implemented: CleanupCall"),
-            NonBinExpr::CleanupExpr(_)      => warn!("Not implemented: CleanupExpr"),
-            NonBinExpr::IdExpr(_)           => warn!("Not implemented: IdExpr"),
-            NonBinExpr::LitExpr(_)          => warn!("Not implemented: LitExpr"),
-            NonBinExpr::ParenExpr(_)        => warn!("Not implemented: ParenExpr"),
-            NonBinExpr::UnaryExpr(_, _)     => warn!("Not implemented: UnaryExpr"),
-            NonBinExpr::IfExpr(_, _)        => warn!("Not implemented: IfExpr"),
-            NonBinExpr::IfElse(_, _, _)     => warn!("Not implemented: IfElse"),
-            NonBinExpr::UnlExpr(_, _)       => warn!("Not implemented: UnlExpr"),
-            NonBinExpr::UnlElse(_, _, _)    => warn!("Not implemented: UnlElse"),
-            NonBinExpr::WhileExpr(_, _)     => warn!("Not implemented: WhileExpr"),
-            NonBinExpr::DoWhile(_, _)       => warn!("Not implemented: DoWhile"),
-            NonBinExpr::Break               => warn!("Not implemented: Break"),
-            NonBinExpr::Continue            => warn!("Not implemented: Continue"),
+            NonBinExpr::BlockExpr(exprs)        => Self::compile_block_expr(exprs, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::AssignExpr(id, expr)    => Self::compile_assign_expr(*id, *expr, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::VarDeclAssgn(vd, expr)  => Self::compile_var_decl_assign(*vd, *expr, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::ReturnExpr(expr)       => Self::compile_return_expr(expr.map(|x| *x), plan, instrs, label_gen, fienv, env),
+            NonBinExpr::CleanupCall         => Self::compile_cleanup_call(plan, instrs, label_gen, fienv, env),
+            NonBinExpr::CleanupExpr(expr)      => Self::compile_cleanup_expr(*expr, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::IdExpr(id)           => Self::compile_id_expr(*id, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::LitExpr(lit)          => Self::compile_lit_expr(lit, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::ParenExpr(expr)        => Self::compile_paren_expr(*expr, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::UnaryExpr(un, expr)     => Self::compile_unary_expr(un, *expr, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::IfExpr(cond, expr)        => Self::compile_if_expr(*cond, *expr, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::IfElse(cond, expr1, expr2)     => Self::compile_if_else(*cond, *expr1, *expr2, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::UnlExpr(cond, expr)       => Self::compile_unless_expr(*cond, *expr, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::UnlElse(cond, expr1, expr2)    => Self::compile_unless_else(*cond, *expr1, *expr2, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::WhileExpr(cond, expr)     => Self::compile_while_expr(*cond, *expr, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::DoWhile(expr, cond)       => Self::compile_do_while(*cond, *expr, plan, instrs, label_gen, fienv, env),
+            NonBinExpr::Break               => Self::compile_break(plan, instrs, label_gen, fienv, env),
+            NonBinExpr::Continue            => Self::compile_continue(plan, instrs, label_gen, fienv, env),
         }
-        Ok(())
     }
     pub fn compile_block_expr(mut exprs: Vec<Expr>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
                 let last = match exprs.pop() {
@@ -1397,9 +1403,106 @@ impl Function {
         place.free(fienv);
         Ok(())
     }
+    pub fn compile_var_decl_assign(vd: VarDecl, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: VarDeclAssgn");
+        Ok(())
+    }
+    pub fn compile_return_expr(expr: Option<Expr>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: ReturnExpr");
+        Ok(())
+    }
+    pub fn compile_cleanup_call(plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: CleanupCall");
+        Ok(())
+    }
+    pub fn compile_cleanup_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: CleanupExpr");
+        Ok(())
+    }
+    pub fn compile_id_expr(id: IdExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        let place = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
+        match plan.into_inter_instr(place, env)? {
+            Some(mut instr) => instrs.append(&mut instr),
+            None => {},
+        };
+        Ok(())
+    }
+    pub fn compile_lit_expr(lit: Literal, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: LitExpr");
+        Ok(())
+    }
+    pub fn compile_paren_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: ParenExpr");
+        Ok(())
+    }
+    pub fn compile_unary_expr(un: BudUnop, expr: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: UnaryExpr");
+        Ok(())
+    }
+    pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: IfExpr");
+        Ok(())
+    }
+    pub fn compile_if_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: IfElse");
+        Ok(())
+    }
+    pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: UnlessExpr");
+        Ok(())
+    }
+    pub fn compile_unless_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        Self::compile_if_else(cond, expr2, expr1, plan, instrs, label_gen, fienv, env)
+    }
+    pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: WhileExpr");
+        Ok(())
+    }
+    pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: DoWhile");
+        Ok(())
+    }
+    pub fn compile_break(plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: Break");
+        Ok(())
+    }
+    pub fn compile_continue(plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        warn!("Not implemented: Continue");
+        Ok(())
+    }
     // (id place, places of calculated offsets if any)
     // Calculates the Place for assigning to an IdExpr
+    // I think the calculated place can also be read from just as well with no side effects
     // If the Place is a Ref, you must free the ATemp and Option<DTemp> stored in it.
+    ///
+    /// Calculates a place that can be read from or written to that represents this IdExpr. DO NOT put arrays or
+    /// structs in data registers. `Place::index_into()` will modify the data register to index into it. This place
+    /// is live, meaning you are not free to destroy it or modify it unless you actually want to write to it.
+    /// 
+    /// `match id {`
+    /// 
+    /// * `IdExpr::SquareIndex(id, offset) =>`
+    /// Call `place_from_id_expr` on `id` and `offset`, and index into the given place using `Place::index_into()`.
+    /// 
+    /// * `IdExpr::RoundIndex(id, offset_exprs) =>`
+    /// The id must refer to a function, an array or a reference. 
+    /// If it's an function, then call the function with `offset_exprs` as the arguments.
+    /// If it's an array or struct, then insert code to check that the first argument of offset_exprs--
+    /// which represents the offset--is within the range of this array. If one extra argument is specified, 
+    /// it represents the maximum. No exception will be generated if `0 <= offset < max`. If two extra arguments
+    /// are specified, they represent a minimum and a maximum respectively. No exception will be generated if 
+    /// `min <= offset < max`. Then index into the place the same way as if id was a `SquareIndex`. 
+    /// **Not currently implemented.**
+    /// 
+    /// * `IdExpr::Id(name) =>`
+    /// Return this variable as a place
+    /// 
+    /// * `IdExpr::Deref(id_expr) =>`
+    /// Return the place containing `id_expr` by calling `place_from_id_expr` on `id_expr`. Remember, that if `id` 
+    /// is `IdExpr::Deref`, then the user typed the dereference operator and wants to assign to the referenced
+    /// object or read from it. 
+    /// 
+    /// `}`
     pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
         match id {
             IdExpr::SquareIndex(id, offset) => {
@@ -1440,7 +1543,10 @@ impl Function {
                     }
                 }
             },
-            IdExpr::RoundIndex(_, _) => todo!(),
+            IdExpr::RoundIndex(_, _) => {
+                warn!("Round index not implemented");
+                todo!()
+            },
             IdExpr::Id(id) => {
                 // We need to store the result of expr into the variable, id
                 let place = match fienv.vars.get(&id) {
@@ -1453,11 +1559,10 @@ impl Function {
                 };
                 Ok(place)
             },
-            IdExpr::Reference(id_expr) => {
+            IdExpr::Deref(id_expr) => {
                 // We need to store the result of expr into the memory
                 // location pointed to by the variable, id
-                let id_place = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
-                let place = id_place.index_into(None, 0, instrs, fienv, env)?;
+                let place = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
                 Ok(place)
             },
         }

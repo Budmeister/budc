@@ -1,6 +1,6 @@
 
-i32 fun(i32 a) {
-    a = a;
+i32 fun(i32[3] a, i32 b) {
+    b = a[4];
     return 0;
 }
 

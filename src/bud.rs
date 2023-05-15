@@ -124,6 +124,8 @@ grammar::grammar!(
         VarDeclAssgn,
         Expr,
         TypeExpr,
+        Sqr,
+        SqrExpr,
         Expr2,
         Exprs,
         NonBinExpr,
@@ -176,6 +178,11 @@ grammar::grammar!(
         VarDeclsPar => LeftRound, RightRound;
         VarDeclsPar => LeftRound, VarDecls, RightRound;
 
+        Sqr => LeftSquare, Expr, RightSquare;
+        Sqr => LeftSquare, Expr, RightSquare, Sqr;
+
+        SqrExpr => IdGen, Sqr;
+
 
         // Statements
         Expr2   => Expr, Expr2;
@@ -207,7 +214,7 @@ grammar::grammar!(
         NonBinExpr  => DoWhile;
 
         TypeExpr    => IdGen;
-        TypeExpr    => TypeExpr, LeftSquare, NumGen, RightSquare;
+        TypeExpr    => SqrExpr;
         TypeExpr    => Reference, LeftRound, TypeExpr, RightRound;
 
         BlockExpr   => LeftSquiggly, Expr2, RightSquiggly;
@@ -217,11 +224,11 @@ grammar::grammar!(
         ReturnExpr  => Return, Expr, Semicolon;
         CleanupCall => Cleanup, Semicolon;
         CleanupExpr => Cleanup, Expr, Semicolon;
-        IdExpr      => Expr, LeftSquare, Expr, RightSquare;
-        IdExpr      => Expr, LeftRound, Exprs, RightRound;
-        IdExpr      => Expr, LeftRound, RightRound;
+        IdExpr      => SqrExpr;
+        IdExpr      => IdGen, LeftRound, Exprs, RightRound;
+        IdExpr      => IdGen, LeftRound, RightRound;
         IdExpr      => IdGen;
-        IdExpr      => Reference, IdExpr;
+        IdExpr      => Star, IdExpr;
         ParenExpr   => LeftRound, Expr, RightRound;
         UnaryExpr   => Unop, NonBinExpr;
         BinaryExpr  => NonBinExpr, Binop, BinaryExpr;
@@ -257,7 +264,7 @@ grammar::grammar!(
         Binop       => Less;
         Binop       => LessEq;
         Unop        => Not;
-        Unop        => Star;
+        Unop        => Reference;
         Unop        => Minus;
 
     }
@@ -466,6 +473,8 @@ impl std::fmt::Display for BudNonTerminal {
                 BudNonTerminal::VarDecl => "V",
                 BudNonTerminal::Expr => "E",
                 BudNonTerminal::TypeExpr => "Te",
+                BudNonTerminal::Sqr => "Sq",
+                BudNonTerminal::SqrExpr => "Sqe",
                 BudNonTerminal::Expr2 => "E2",
                 BudNonTerminal::Exprs => "Es",
                 BudNonTerminal::NonBinExpr => "Nbe",
@@ -680,6 +689,11 @@ impl Expr {
         Ok(items)
     }
 }
+impl Into<Result<i32, String>> for Expr {
+    fn into(self) -> Result<i32, String> {
+        (*self.bin_expr).into()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum BinExpr {
@@ -712,6 +726,14 @@ impl BinExpr {
             _ => {
                 return Err(format!("Invalid node for {} {:?}", N::BinaryExpr, children));
             }
+        }
+    }
+}
+impl Into<Result<i32, String>> for BinExpr {
+    fn into(self) -> Result<i32, String> {
+        match self {
+            BinExpr::NonBin(nbe) => (*nbe).into(),
+            _ => Err(format!("Cannot convert binary expression to num"))
         }
     }
 }
@@ -785,11 +807,18 @@ impl NonBinExpr {
         children: &Vec<Node<BudTerminal, BudNonTerminal>>,
     ) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::NonTm(N::VarDecl, var), Node::Tm(T::Assign), Node::NonTm(N::Expr, expr), Node::Tm(T::Semicolon)] => Ok(
-                NonBinExpr::VarDeclAssgn(Box::new(VarDecl::new(var)?), Box::new(Expr::new(expr)?)),
-            ),
+            [Node::NonTm(N::VarDecl, var), Node::Tm(T::Assign), Node::NonTm(N::Expr, expr), Node::Tm(T::Semicolon)] => {
+                Ok(NonBinExpr::VarDeclAssgn(
+                    Box::new(VarDecl::new(var)?),
+                    Box::new(Expr::new(expr)?),
+                ))
+            }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::VarDeclAssgn, children));
+                return Err(format!(
+                    "Invalid node for {} {:?}",
+                    N::VarDeclAssgn,
+                    children
+                ));
             }
         }
     }
@@ -812,7 +841,11 @@ impl NonBinExpr {
         match &children[..] {
             [Node::Tm(T::Cleanup), Node::Tm(T::Semicolon)] => Ok(NonBinExpr::CleanupCall),
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::CleanupCall, children));
+                return Err(format!(
+                    "Invalid node for {} {:?}",
+                    N::CleanupCall,
+                    children
+                ));
             }
         }
     }
@@ -824,7 +857,11 @@ impl NonBinExpr {
                 Ok(NonBinExpr::CleanupExpr(Box::new(Expr::new(expr)?)))
             }
             _ => {
-                return Err(format!("Invalid node for {} {:?}", N::CleanupExpr, children));
+                return Err(format!(
+                    "Invalid node for {} {:?}",
+                    N::CleanupExpr,
+                    children
+                ));
             }
         }
     }
@@ -951,61 +988,187 @@ impl NonBinExpr {
         }
     }
 }
+impl Into<Result<i32, String>> for NonBinExpr {
+    fn into(self) -> Result<i32, String> {
+        match self {
+            NonBinExpr::LitExpr(Literal::Num(num)) => Ok(num),
+            NonBinExpr::LitExpr(Literal::Str(string)) => Err(format!("Cannot convert string \"{}\" to num", string)),
+            NonBinExpr::BlockExpr(_)        => Err("Cannot convert BlockExpr to num"        .to_owned()),
+            NonBinExpr::AssignExpr(_, _)    => Err("Cannot convert AssignExpr to num"       .to_owned()),
+            NonBinExpr::VarDeclAssgn(_, _)  => Err("Cannot convert VarDeclAssgn to num"     .to_owned()),
+            NonBinExpr::ReturnExpr(_)       => Err("Cannot convert ReturnExpr to num"       .to_owned()),
+            NonBinExpr::CleanupCall         => Err("Cannot convert CleanupCall to num"      .to_owned()),
+            NonBinExpr::CleanupExpr(_)      => Err("Cannot convert CleanupExpr to num"      .to_owned()),
+            NonBinExpr::IdExpr(_)           => Err("Cannot convert IdExpr to num"           .to_owned()),
+            NonBinExpr::ParenExpr(_)        => Err("Cannot convert ParenExpr to num"        .to_owned()),
+            NonBinExpr::UnaryExpr(_, _)     => Err("Cannot convert UnaryExpr to num"        .to_owned()),
+            NonBinExpr::IfExpr(_, _)        => Err("Cannot convert IfExpr to num"           .to_owned()),
+            NonBinExpr::IfElse(_, _, _)     => Err("Cannot convert IfElse to num"           .to_owned()),
+            NonBinExpr::UnlExpr(_, _)       => Err("Cannot convert UnlExpr to num"          .to_owned()),
+            NonBinExpr::UnlElse(_, _, _)    => Err("Cannot convert UnlElse to num"          .to_owned()),
+            NonBinExpr::WhileExpr(_, _)     => Err("Cannot convert WhileExpr to num"        .to_owned()),
+            NonBinExpr::DoWhile(_, _)       => Err("Cannot convert DoWhile to num"          .to_owned()),
+            NonBinExpr::Break               => Err("Cannot convert Break to num"            .to_owned()),
+            NonBinExpr::Continue            => Err("Cannot convert Continue to num"         .to_owned()),
+            
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum IdExpr {
     SquareIndex(Box<Expr>, Box<Expr>),
     RoundIndex(Box<Expr>, Option<Exprs>),
     Id(Id),
-    Reference(Box<IdExpr>),
+    Deref(Box<IdExpr>),
 }
 impl IdExpr {
     pub fn new(children: &BudNodes) -> Result<IdExpr, String> {
         match &children[..] {
-            [Node::NonTm(N::Expr, arr), Node::Tm(T::LeftSquare), Node::NonTm(N::Expr, ind), Node::Tm(T::RightSquare)] => {
-                Ok(IdExpr::SquareIndex(
-                    Box::new(Expr::new(arr)?),
-                    Box::new(Expr::new(ind)?),
-                ))
-            }
-            [Node::NonTm(N::Expr, arr), Node::Tm(T::LeftRound), Node::NonTm(N::Exprs, args), Node::Tm(T::RightRound)] => {
+            [Node::NonTm(N::SqrExpr, sqe)] => {
+                let id_expr = Self::sqe_to_id_sqr(sqe)?;
+                Ok(id_expr)
+            },
+            [Node::Tm(T::Id(id)), Node::Tm(T::LeftRound), Node::NonTm(N::Exprs, args), Node::Tm(T::RightRound)] => {
                 Ok(IdExpr::RoundIndex(
-                    Box::new(Expr::new(arr)?),
+                    Box::new(Self::id_to_expr(id.to_owned())),
                     Some(Expr::news(args)?),
                 ))
             }
-            [Node::NonTm(N::Expr, arr), Node::Tm(T::LeftRound), Node::Tm(T::RightRound)] => {
-                Ok(IdExpr::RoundIndex(Box::new(Expr::new(arr)?), None))
+            [Node::Tm(T::Id(id)), Node::Tm(T::LeftRound), Node::Tm(T::RightRound)] => {
+                let expr = Self::id_to_expr(id.to_owned());
+                Ok(IdExpr::RoundIndex(Box::new(expr), None))
             }
             [Node::Tm(T::Id(id))] => Ok(IdExpr::Id(id.to_owned())),
-            [Node::Tm(T::Reference), Node::NonTm(N::IdExpr, ide)] => {
-                Ok(IdExpr::Reference(Box::new(IdExpr::new(ide)?)))
+            [Node::Tm(T::Star), Node::NonTm(N::IdExpr, ide)] => {
+                Ok(IdExpr::Deref(Box::new(IdExpr::new(ide)?)))
             }
             _ => {
                 return Err(format!("Invalid node for {} {:?}", N::IdExpr, children));
             }
         }
     }
+    fn id_to_expr(id: String) -> Expr{
+        Self::id_expr_to_expr(IdExpr::Id(id))
+    }
+    fn id_expr_to_expr(id_expr: IdExpr) -> Expr {
+        Expr {
+            bin_expr: Box::new(
+                BinExpr::NonBin(
+                    Box::new(
+                        NonBinExpr::IdExpr(
+                            Box::new(
+                                id_expr,
+                            )
+                        )
+                    )
+                )
+            ),
+            with_semicolon: false,
+        }
+
+    }
+    fn sqe_to_id_sqr(children: &BudNodes) -> Result<IdExpr, String> {
+        match &children[..] {
+            [Node::Tm(T::Id(id)), Node::NonTm(N::Sqr, sqr)] => {
+                let mut id_expr = IdExpr::Id(id.to_owned());
+                id_expr = Self::put_indices_on(id_expr, sqr)?;
+                Ok(id_expr)
+            }
+            _ => {
+                return Err(format!("Invalid node for {} being interpreted as {} {:?}", N::SqrExpr, N::IdExpr, children));
+            }
+        }
+    }
+    fn put_indices_on(id: IdExpr, sqr: &BudNodes) -> Result<IdExpr, String> {
+        let id_expr = Self::id_expr_to_expr(id);
+        match &sqr[..] {
+            [Node::Tm(T::LeftSquare), Node::NonTm(N::Expr, expr), Node::Tm(T::RightSquare), Node::NonTm(N::Sqr, sqr2)] => {
+                let expr = Expr::new(expr)?;
+                let mut id_expr = IdExpr::SquareIndex(
+                    Box::new(id_expr),
+                    Box::new(expr)
+                );
+                id_expr = Self::put_indices_on(id_expr, sqr2)?;
+                Ok(id_expr)
+            }
+            [Node::Tm(T::LeftSquare), Node::NonTm(N::Expr, expr), Node::Tm(T::RightSquare)] => {
+                let expr = Expr::new(expr)?;
+                let id_expr = IdExpr::SquareIndex(
+                    Box::new(id_expr),
+                    Box::new(expr)
+                );
+                Ok(id_expr)
+            }
+            _ => {
+                return Err(format!("Invalid node for {} being interpreted as array indices {:?}", N::Sqr, sqr))
+            }
+        }
+
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum TypeExpr {
     Id(Id),
-    Array(Box<TypeExpr>, i32),
+    TypSqr(Box<TypeExpr>, Vec<i32>),
     Pointer(Box<TypeExpr>),
 }
 impl TypeExpr {
     pub fn new(children: &BudNodes) -> Result<TypeExpr, String> {
         match &children[..] {
             [Node::Tm(T::Id(id))] => Ok(TypeExpr::Id(id.to_owned())),
-            [Node::NonTm(N::TypeExpr, typ), Node::Tm(T::LeftSquare), Node::Tm(T::Num(num)), Node::Tm(T::RightSquare)] => {
-                Ok(TypeExpr::Array(Box::new(TypeExpr::new(typ)?), *num))
+            [Node::NonTm(N::SqrExpr, sqe)] => {
+                Self::sqe_to_typ_sqr(sqe)
+            }
+            [Node::Tm(T::Reference), Node::Tm(T::LeftRound), Node::NonTm(N::TypeExpr, te), Node::Tm(T::RightRound), Node::NonTm(N::Sqr, sqr)] => {
+                Ok(TypeExpr::TypSqr(
+                    Box::new(TypeExpr::Pointer(Box::new(TypeExpr::new(te)?))),
+                    {
+                        let mut lengths = Vec::new();
+                        Self::sqr_to_lengths(sqr, &mut lengths)?;
+                        lengths
+                    },
+                ))
             }
             [Node::Tm(T::Reference), Node::Tm(T::LeftRound), Node::NonTm(N::TypeExpr, typ), Node::Tm(T::RightRound)] => {
                 Ok(TypeExpr::Pointer(Box::new(TypeExpr::new(typ)?)))
             }
             _ => {
                 return Err(format!("Invalid node for {} {:?}", N::TypeExpr, children));
+            }
+        }
+    }
+    fn sqe_to_typ_sqr(children: &BudNodes) -> Result<TypeExpr, String> {
+        match &children[..] {
+            [Node::Tm(T::Id(id)), Node::NonTm(N::Sqr, sqr)] => {
+                let id = Box::new(TypeExpr::Id(id.to_owned()));
+                let mut lengths = Vec::new();
+                Self::sqr_to_lengths(sqr, &mut lengths)?;
+                Ok(TypeExpr::TypSqr(id, lengths))
+            }
+            _ => {
+                return Err(format!("Invalid node for {} being interpreted as {} {:?}", N::SqrExpr, N::TypeExpr, children));
+            }
+        }
+    }
+    fn sqr_to_lengths(children: &BudNodes, lengths: &mut Vec<i32>) -> Result<(), String> {
+        match &children[..] {
+            [Node::Tm(T::LeftSquare), Node::NonTm(N::Expr, expr), Node::Tm(T::RightSquare), Node::NonTm(N::Sqr, sqr2)] => {
+                let expr = Expr::new(expr)?;
+                let length = Into::<Result<i32, String>>::into(expr)?;
+                lengths.push(length);
+                Self::sqr_to_lengths(sqr2, lengths)?;
+                Ok(())
+            }
+            [Node::Tm(T::LeftSquare), Node::NonTm(N::Expr, expr), Node::Tm(T::RightSquare)] => {
+                let expr = Expr::new(expr)?;
+                let length: i32 = Into::<Result<i32, String>>::into(expr)?;
+                lengths.push(length);
+                Ok(())
+            }
+            _ => {
+                return Err(format!("Invalid node for {} being interpreted as array lengths {:?}", N::Sqr, children));
             }
         }
     }

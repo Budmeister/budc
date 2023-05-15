@@ -16,6 +16,8 @@ Vs (VarDecls)           [Comma-separated VarDecls]
 V (VarDecl)             [A type and a name (no assignment)]
 E (Expr)                [assignment, declaration, function calls, array indexing, combinations, etc.]
 Te (TypeExpr)           [Pointer types, arrays, etc.]
+Sq (Sqr)                [One or more sequential expressions each in square brackets]
+Sqe (SqrExpr)           [An expression followed by Sqr]
 E2 (Expr2)              [One or more expressions in a row--for statement expressions]
 Es (Exprs)              [One or more comma-separated expressions]
 Nbe (NonBinExpr)        [An expression that is not a binary expression]
@@ -37,7 +39,7 @@ Ul (UnlExpr)
 Ule (UnlElse)
 We (WhileExpr)
 Dw (DoWhile)
-U (UnaryOp)             [!, -, *, @ (the reference operator)]
+U (UnaryOp)             [!, -, @ (the reference operator)] (*, the dereference operator is part of IdExpr)
 B (BinOp)               [+, -, *, /, &&, ||, &, |, ^, ==, !=, >, >=, <, <=]
 
 
@@ -114,6 +116,11 @@ Vs -> V
 Vsp -> ()
 Vsp -> (Vs)
 
+Sq -> [E]
+Sq -> [E] Sq
+
+Sqe -> id Sq
+
 # Statements
 E2 -> E E2      # 2 expressions in a row will sometimes pass the grammar
 E2 -> E         # checker (and it should be allowed, since statements are
@@ -142,7 +149,8 @@ Nbe -> We
 Nbe -> Dw
 
 Te -> id
-Te -> Te[num]
+Te -> Sqe
+Te -> @(Te) Sq
 Te -> @(Te)     # @ is the reference operator
 
 Ble -> { E2 }
@@ -152,11 +160,11 @@ Re -> return;
 Re -> return Expr;
 Cc -> cleanup;
 Ce -> cleanup Expr;
-Ie -> E[E]      # If this is illegal, it will be caught by the expander.
-Ie -> E(Es)     # Parenthetical indexing causes bounds checking at runtime.
-Ie -> E()
+Ie -> Sqe       # If this is illegal, it will be caught by the expander.
+Ie -> id(Es)    # Parenthetical indexing causes bounds checking at runtime.
+Ie -> id()
 Ie -> id
-Ie -> @Ie
+Ie -> *Ie
 Pe -> ( E )
 Ue -> U Nbe
 Be -> Nbe B Be
@@ -193,6 +201,6 @@ B -> >=
 B -> <
 B -> <=
 U -> !
-U -> *
+U -> @
 U -> &
 U -> -

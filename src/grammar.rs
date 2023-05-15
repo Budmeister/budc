@@ -79,7 +79,7 @@ fn is_subsequence<
     loop {
         if i == n {
             if i == m {
-                warn!("Comparisons between ders {} and {} were equal; None was returned", der1, der2);
+                // warn!("Comparisons between ders {} and {} were equal; None was returned", der1, der2);
                 return SubseqData::Equal;
             } else {
                 return SubseqData::Less(der2.der.to[i].clone());
