@@ -671,7 +671,7 @@ impl TypeType {
     fn to_string(&self) -> String {
         match self {
             TypeType::Id(id) => id.to_owned(),
-            TypeType::Pointer(typtyp) => "*(".to_owned() + &typtyp.to_string() + ")",
+            TypeType::Pointer(typtyp) => "@(".to_owned() + &typtyp.to_string() + ")",
             TypeType::Array(typtyp, len) => typtyp.to_string() + "[" + &len.to_string() + "]",
             TypeType::Struct(name, _) => name.to_owned(),
         }
@@ -790,7 +790,7 @@ impl Place {
                 tt.clone()
             }
             Place::Ref(_, _, _, tt) => {
-                TypeType::Pointer(Box::new(tt.clone()))
+                tt.clone()
             }
         }
     }
@@ -811,14 +811,14 @@ impl Place {
     }
     /// Moves the value in the given DTemp to a new ATemp. This function frees the DTemp, and you must free the ATemp.
     fn d_to_a(d: DTemp, tt: TypeType, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<ATemp, String> {
-        let size = match tt.get_data_size(env) {
-            Some(size) => size,
+        match tt.get_data_size(env) {
+            Some(_) => {},
             None => { return Err(format!("DTemp {} containing large value", d)); },
         };
-        let a = fienv.get_addr_temp(env)?;
+        let a = fienv.get_addr_temp()?;
         let d_place = Place::DTemp(d, tt.clone());
         let a_place = Place::ATemp(a);
-        let instr = InterInstr::Move(size, d_place, a_place);
+        let instr = InterInstr::Move(d_place, a_place);
         instrs.push(instr);
         fienv.free_data_temp(d);
         Ok(a)
@@ -925,8 +925,7 @@ impl Place {
                         if let Some(d_) = d_ {
                             let d_place_ = Place::DTemp(d_, TypeType::Id("i32".to_owned()));
                             let d_place = Place::DTemp(d, TypeType::Id("i32".to_owned()));
-                            let size = DataSize::LWord;
-                            let instr = InterInstr::Binop(size, d_place, BudBinop::Plus, d_place_);
+                            let instr = InterInstr::Binop(d_place, BudBinop::Plus, d_place_);
                             instrs.push(instr);
                         } else {
                             d_ = Some(d);
@@ -938,15 +937,14 @@ impl Place {
                     // We actually want to index into the thing this Ref is pointing to
                     // which must be a pointer, since !(is_struct || is_array)
                     let a_place = Place::ATemp(a);
-                    let size = DataSize::LWord;
-                    let instr = InterInstr::Move(size, self, a_place);
+                    let instr = InterInstr::Move(self, a_place);
                     if let Some(d_) = d_ { fienv.free_data_temp(d_); }
                     instrs.push(instr);
                     Ok(Place::Ref(a, d, off, tt))
                 }
             }
             Place::Var(Field { name, tt: _ }) => {
-                let a = fienv.get_addr_temp(env)?;
+                let a = fienv.get_addr_temp()?;
                 let a_place = Place::ATemp(a);
                 let instr = InterInstr::MoVA(name, a_place);
                 instrs.push(instr);
@@ -1029,7 +1027,7 @@ impl std::fmt::Debug for Place {
 }
 
 // For telling an expression where to put its output
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ReturnPlan {
     Binop(BudBinop, Place), // Place must have a magic type
     Move(Place),
@@ -1037,26 +1035,31 @@ pub enum ReturnPlan {
     None,
 }
 impl ReturnPlan {
-    /// Returns None if there is no return plan.
-    /// Frees this place
-    pub fn into_inter_instr(self, from: Place, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Option<Vec<InterInstr>>, String> {
+    /// Also frees this place
+    pub fn into_inter_instr(self, from: Place, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match self {
             ReturnPlan::Binop(b, to) => {
-                let instr = InterInstr::Binop(
-                    match to.get_data_size(env) {
-                        Some(ds) => ds,
-                        None => {
-                            return Err(format!("Trying to do binop {} on type {}", b, to.get_type()));
-                        }
-                    },
-                    from.clone(), b, to);
-                from.free(fienv);
-                Ok(Some(vec![instr]))
+                if !to.is_magic(env) {
+                    return Err(format!("Cannot do binary operator {} on non-magic type {}", b, to.get_type()));
+                }
+                if !from.is_magic(env) {
+                    return Err(format!("Cannot do binary operator {} on non-magic type {}", b, from.get_type()));
+                }
+                let instr = InterInstr::Binop(from.clone(), b, to);
+                instrs.push(instr);
             }
-            ReturnPlan::Move(to) => Ok(Some(InterInstr::move_mem(from, to, env))),
-            ReturnPlan::Push(tt) => Ok(Some(InterInstr::push_mem(from, tt, env))),
-            ReturnPlan::None => Ok(None),
+            ReturnPlan::Move(to) => {
+                let instr = InterInstr::Move(from.clone(), to);
+                instrs.push(instr);
+            },
+            ReturnPlan::Push(tt) => {
+                let instr = InterInstr::Push(from.clone(), tt);
+                instrs.push(instr);
+            }
+            ReturnPlan::None => {},
         }
+        from.free(fienv);
+        Ok(())
     }
     /// Returns None if there is no return plan
     /// Pass a size of LWord if it doesn't matter. This function will coerce the size to the one the plan requires.
@@ -1103,16 +1106,16 @@ impl ReturnPlan {
 // instructions before I have generated the stack frame
 #[derive(Debug)]
 pub enum InterInstr {
-    Binop(DataSize, Place, BudBinop, Place),    // Dest. on right (SUB subtracts src from dest. and stores in dest.; DIV, too)
+    Binop(Place, BudBinop, Place),    // Dest. on right (SUB subtracts src from dest. and stores in dest.; DIV, too)
     Binopi(Imm, BudBinop, Place),
-    Neg(DTemp, DataSize),
-    Bnot(DTemp, DataSize),                      // Boolean NOT--not bitwise NOT
-    Move(DataSize, Place, Place),
+    Neg(Place),                                 // Neg and Bnot must not be an ATemp
+    Bnot(Place),                                // Boolean NOT--not bitwise NOT
+    Move(Place, Place),
     MoVA(String, Place),                        // Move Var Address
     Movi(Imm, Place),
     Movs(usize, Place),                         // Move string literal (by the string literal's global label)
     Lea(ATemp, Option<DTemp>, i32, ATemp),      // Load effective address into an address register
-    Push(Place),
+    Push(Place, TypeType),
     PuVA(String),
     Pusi(Imm, TypeType),                        // Do we really need the TypeType for an Imm?
     Puss(usize),                                // Push string literal (by the string literal's global label)
@@ -1137,18 +1140,6 @@ pub enum InterInstr {
 }
 // Common instruction patterns
 impl InterInstr {
-    pub fn move_mem(from: Place, to: Place, env: &Environment) -> Vec<InterInstr> {
-        match to.get_data_size(env) {
-            Some(ds) => vec![InterInstr::Move(ds, from, to)],
-            None => {
-                todo!()
-            }
-        }
-
-    }
-    pub fn push_mem(from: Place, tt: TypeType, env: &Environment) -> Vec<InterInstr> {
-        todo!()
-    }
 }
 
 pub struct FunctionInterEnvironment {
@@ -1204,7 +1195,7 @@ impl FunctionInterEnvironment {
         Ok(place)
     }
     // Addr temps can point to anything
-    pub fn get_addr_temp(&mut self, env: &Environment) -> Result<usize, String> {
+    pub fn get_addr_temp(&mut self) -> Result<usize, String> {
         // If a addr temp is available, give it out
         for (temp, used) in self.atemps.iter_mut().enumerate() {
             if !*used {
@@ -1319,19 +1310,13 @@ impl Function {
                         // As a future optimization, we do not need to get a new place if
                         // both binops are the same and if the binop is associative
                         let tt = place.get_type();
-                        let temp = fienv.get_data_temp(tt.clone(), env)?;
-                        let t_place = Place::DTemp(temp, tt);
-                        let plan = ReturnPlan::Move(t_place.clone());
+                        let dtemp = fienv.get_data_temp(tt.clone(), env)?;
+                        let d_place = Place::DTemp(dtemp, tt);
+                        let plan = ReturnPlan::Move(d_place.clone());
                         Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
-                        let plan = ReturnPlan::Binop(b, t_place.clone());
+                        let plan = ReturnPlan::Binop(b, d_place.clone());
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
-                        let ret_action = ReturnPlan::Binop(pb, place)
-                            .into_inter_instr(t_place.clone(), fienv, env)?;
-                        fienv.free_data_temp(temp);
-                        match ret_action {
-                            Some(mut ret_instrs) => instrs.append(&mut ret_instrs),
-                            None => {},
-                        }
+                        ReturnPlan::Binop(pb, place).into_inter_instr(d_place, instrs, fienv, env)?;
                     },
                     ReturnPlan::Move(place) => {
                         let plan = ReturnPlan::Move(place.clone());
@@ -1340,14 +1325,14 @@ impl Function {
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
                     },
                     ReturnPlan::Push(tt) => {
-                        let temp = fienv.get_data_temp(tt.clone(), env)?;
-                        let t_place = Place::DTemp(temp, tt);
-                        let plan = ReturnPlan::Move(t_place.clone());
+                        let dtemp = fienv.get_data_temp(tt.clone(), env)?;
+                        let d_place = Place::DTemp(dtemp, tt.clone());
+                        let plan = ReturnPlan::Move(d_place.clone());
                         Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
-                        let plan = ReturnPlan::Binop(b, t_place.clone());
+                        let plan = ReturnPlan::Binop(b, d_place.clone());
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
-                        let instr = InterInstr::Push(t_place);
-                        fienv.free_data_temp(temp);
+                        let instr = InterInstr::Push(d_place, tt);
+                        fienv.free_data_temp(dtemp);
                         instrs.push(instr);
                     },
                     ReturnPlan::None => {
@@ -1386,45 +1371,41 @@ impl Function {
         }
     }
     pub fn compile_block_expr(mut exprs: Vec<Expr>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-                let last = match exprs.pop() {
-                    Some(expr) => expr,
-                    None => {
-                        // Empty block expression
-                        match &plan {
-                            ReturnPlan::None => {
-                                return Ok(());
-                            },
-                            ReturnPlan::Binop(b, place) => {
-                                return Err(format!("Empty block expression but expected to return to a binop expression, {} at {}", b, place));
-                            }
-                            ReturnPlan::Move(place) => {
-                                return Err(format!("Empty block expression but expected to move result to {}", place));
-                            }
-                            ReturnPlan::Push(tt) => {
-                                return Err(format!("Empty block expression but expected to push result of type {}", tt));
-                            }
-                        }
+        let last = match exprs.pop() {
+            Some(expr) => expr,
+            None => {
+                // Empty block expression
+                match &plan {
+                    ReturnPlan::None => {
+                        return Ok(());
                     },
-                };
-
-                for expr in exprs {
-                    Self::compile_expr(expr, ReturnPlan::None, instrs, label_gen, fienv, env)?;
-                    // Check that the expressions have semicolons?
-                    // If we were to print errors and recover, this would be a good point to do it
+                    ReturnPlan::Binop(b, place) => {
+                        return Err(format!("Empty block expression but expected to return to a binop expression, {} at {}", b, place));
+                    }
+                    ReturnPlan::Move(place) => {
+                        return Err(format!("Empty block expression but expected to move result to {}", place));
+                    }
+                    ReturnPlan::Push(tt) => {
+                        return Err(format!("Empty block expression but expected to push result of type {}", tt));
+                    }
                 }
-                Self::compile_expr(last, plan, instrs, label_gen, fienv, env)?;
-                Ok(())
+            },
+        };
+
+        for expr in exprs {
+            Self::compile_expr(expr, ReturnPlan::None, instrs, label_gen, fienv, env)?;
+            // Check that the expressions have semicolons?
+            // If we were to print errors and recover, this would be a good point to do it
+        }
+        Self::compile_expr(last, plan, instrs, label_gen, fienv, env)?;
+        Ok(())
     }
     pub fn compile_assign_expr(id: IdExpr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         // Check that the variable exists
         let place = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
         let assign_plan = ReturnPlan::Move(place.clone());
         Self::compile_expr(expr, assign_plan, instrs, label_gen, fienv, env)?;
-        match plan.into_inter_instr(place.clone(), fienv, env)? {
-            Some(mut plan_instrs) => instrs.append(&mut plan_instrs),
-            None => {}
-        };
-        place.free(fienv);
+        plan.into_inter_instr(place, instrs, fienv, env)?;
         Ok(())
     }
     pub fn compile_var_decl_assign(vd: VarDecl, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
@@ -1445,12 +1426,7 @@ impl Function {
     }
     pub fn compile_id_expr(id: IdExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         let place = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
-        match plan.into_inter_instr(place, fienv, env)? {
-            Some(mut instr) => {
-                instrs.append(&mut instr);
-            },
-            None => {},
-        };
+        plan.into_inter_instr(place, instrs, fienv, env)?;
         Ok(())
     }
     pub fn compile_lit_expr(lit: Literal, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
@@ -1540,12 +1516,14 @@ impl Function {
                                 }
                                 Place::DTemp(to_d, to_tt) => {
                                     // Move from Ref to ATemp to DTemp
+                                    // Because we are moving an effective address, we have to move
+                                    // to an ATemp before we move to a DTemp
                                     if let TypeType::Pointer(to_val_tt) = &to_tt {
                                         if tt == **to_val_tt {
                                             let instr = InterInstr::Lea(a, d, off, a);
                                             instrs.push(instr);
                                             let a_place = Place::ATemp(a);
-                                            let instr = InterInstr::Move(DataSize::LWord, a_place, to);
+                                            let instr = InterInstr::Move(a_place, to);
                                             instrs.push(instr);
                                             fienv.free_addr_temp(a);
                                             if let Some(d) = d { fienv.free_data_temp(d); }
@@ -1567,7 +1545,7 @@ impl Function {
                                             let instr = InterInstr::Lea(a, d, off, a);
                                             instrs.push(instr);
                                             let a_place = Place::ATemp(a);
-                                            let instr = InterInstr::Move(DataSize::LWord, a_place, to);
+                                            let instr = InterInstr::Move(a_place, to);
                                             instrs.push(instr);
                                             fienv.free_addr_temp(a);
                                             if let Some(d) = d { fienv.free_data_temp(d); }
@@ -1591,7 +1569,7 @@ impl Function {
                                             let instr = InterInstr::Lea(a, d, off, a);
                                             instrs.push(instr);
                                             let a_place = Place::ATemp(a);
-                                            let instr = InterInstr::Move(DataSize::LWord, a_place, to);
+                                            let instr = InterInstr::Move(a_place, to);
                                             instrs.push(instr);
                                             fienv.free_addr_temp(a);
                                             if let Some(d) = d { fienv.free_data_temp(d); }
@@ -1643,44 +1621,48 @@ impl Function {
         if let BudUnop::Ref = un {
             return Self::get_reference(nbe, plan, instrs, label_gen, fienv, env);
         }
-        let plan2;
-        let mut dtemp = None;
         if let Some(tt) = &tt {
             if !tt.is_magic(env) {
                 return Err(format!("Cannot return non-magic type {} from unary operator", tt));
             }
-            let dtemp_ = fienv.get_data_temp(tt.clone(), env)?;
-            dtemp = Some(dtemp_);
-            let place = Place::DTemp(dtemp_, tt.clone());
-            plan2 = ReturnPlan::Move(place);
-        } else {
-            // We were not given a return plan. Just evaluate the unary expression, but give ReturnPlan::None to the subexpression
-            plan2 = ReturnPlan::None;
         }
-        Self::compile_non_bin_expr(nbe, plan2, instrs, label_gen, fienv, env)?;
-        if let Some(dtemp) = dtemp {
-            match un {
-                BudUnop::Neg => {
-                    let ds = tt
-                        .unwrap()       // if dtemp is Some, then tt is Some
-                        .get_data_size(env)
-                        .unwrap();              // tt is magic, so it has a DataSize 
-                    let instr = InterInstr::Neg(dtemp, ds);
-                    instrs.push(instr);
-                }
-                BudUnop::Not => {
-                    let ds = tt
-                        .unwrap()       // if dtemp is Some, then tt is Some
-                        .get_data_size(env)
-                        .unwrap();              // tt is magic, so it has a DataSize 
-                    let instr = InterInstr::Bnot(dtemp, ds);
-                    instrs.push(instr);
-                }
-                BudUnop::Ref => {
-                    panic!("Ref should be handled above in this function")
-                }
+        match (plan.clone(), un) {
+            (
+                ReturnPlan::Binop(
+                    BudBinop::Times | BudBinop::Div,
+                    to
+                ) | ReturnPlan::Move(to),
+                un
+            ) => {
+                // Store result of `nbe` into `to`, and then do the unop on `to`
+                Self::compile_non_bin_expr(nbe, plan, instrs, label_gen, fienv, env)?;
+                let instr = match un {
+                    BudUnop::Neg => InterInstr::Neg(to),
+                    BudUnop::Not => InterInstr::Bnot(to),
+                    BudUnop::Ref => panic!("Ref should be handled above in this function"),
+                };
+                instrs.push(instr);
             }
-            fienv.free_data_temp(dtemp);
+            (ReturnPlan::Binop(BudBinop::And | BudBinop::Or, _), BudUnop::Neg) | 
+            (ReturnPlan::None, _) => {
+                // Store the result of `nbe` into `to`, but do not do the unop
+                Self::compile_non_bin_expr(nbe, plan, instrs, label_gen, fienv, env)?;
+            }
+            (_, BudUnop::Ref) => panic!("Ref should be handled above in this function"),
+            (_, un) => {
+                // Store the result of `nbe` into a dtemp, do the unop, and then move the dtemp as the plan dictates
+                let tt = tt.unwrap();   // if plan is not None, then tt is not None
+                let dtemp = fienv.get_data_temp(tt.clone(), env)?;
+                let d_place = Place::DTemp(dtemp, tt.clone());
+                let instr = match un {
+                    BudUnop::Neg => InterInstr::Neg(d_place.clone()),
+                    BudUnop::Not => InterInstr::Bnot(d_place.clone()),
+                    BudUnop::Ref => panic!("Ref should be handled above in this function"),
+                };
+                instrs.push(instr);
+                plan.into_inter_instr(d_place, instrs, fienv, env)?;
+                fienv.free_data_temp(dtemp);
+            }
         }
         Ok(())
     }
