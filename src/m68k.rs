@@ -759,9 +759,13 @@ type DTemp = usize;
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub enum Place {
     Var(Field),
-    // ATemp is like diet Ref
-    ATemp(ATemp, TypeType),
+    /// The place represented by the ATemp is the address register itself, not
+    /// the thing pointed to by the ATemp. It represents a void pointer.
+    ATemp(ATemp),
     DTemp(DTemp, TypeType), // RetReg is DTemp(0, _)
+    /// The place represented by this Ref is the location pointed to by the Ref.
+    /// This is not to be confused with ATemp, which place is the address register
+    /// itself.
     Ref(ATemp, Option<DTemp>, i32, TypeType),   // (location of the pointer, optional data offset, offset, typetype pointed to)
                                                 // When compiling Ref Places, move the reference into the reference register, A0,
                                                 // if it is not already in an address register
@@ -779,8 +783,8 @@ impl Place {
             Place::Var(f) => {
                 f.tt.clone()
             }
-            Place::ATemp(_, tt) => {
-                TypeType::Pointer(Box::new(tt.clone()))
+            Place::ATemp(_) => {
+                TypeType::Pointer(Box::new(TypeType::Id("void".to_owned())))
             }
             Place::DTemp(_, tt) => {
                 tt.clone()
@@ -805,6 +809,7 @@ impl Place {
             _ => None,
         }
     }
+    /// Moves the value in the given DTemp to a new ATemp. This function frees the DTemp, and you must free the ATemp.
     fn d_to_a(d: DTemp, tt: TypeType, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<ATemp, String> {
         let size = match tt.get_data_size(env) {
             Some(size) => size,
@@ -812,36 +817,33 @@ impl Place {
         };
         let a = fienv.get_addr_temp(env)?;
         let d_place = Place::DTemp(d, tt.clone());
-        let a_place = Place::ATemp(a, tt);
+        let a_place = Place::ATemp(a);
         let instr = InterInstr::Move(size, d_place, a_place);
         instrs.push(instr);
         fienv.free_data_temp(d);
         Ok(a)
     }
     /// Calculates the Place: `self[d+off]`
-    /// This function consumes this place (frees it) and returns a Ref that you must free
-    /// (unless it is an array or struct stored in DTemp--then this function returns that DTemp
-    /// shifted the right amount)
+    /// This function consumes this place (frees it) and returns a Ref that you must free, unless
+    /// of course the given place is a Var; Vars cannot be consumed.
+    /// 
+    /// Calling `place.index_into(None, 0)` is equivalent to dereferencing `place`.
     /// 
     /// If `self.is_struct()`, then off should be the index of the argument in this struct's layout. 
     /// Otherwise, off should be the number of indices to advance (not multiplied by the size of the item).
     /// 
-    /// If `self.is_array()` and `off >= ` length of `self`, then a warning will be printed.
+    /// If `self.is_array()`, then off is an index, not a memory offset. If `off >= ` length of `self`, then a 
+    /// warning will be printed.
     /// 
-    /// If `self.is_array() || self.is_struct()`, then 
-    /// * **If this Place is DTemp, it shifts the DTemp the correct number of places and changes its type, then returns it**
+    /// * If this Place is DTemp, then the type of the DTemp must be a Reference. This function moves the DTemp 
+    ///   into an ATemp and returns that ATemp as a Ref as it would with an ATemp
     /// * If this Place is ATemp, it returns it as a Ref
     /// * If this Place is Var, it moves the location of the Var to an ATemp and returns the ATemp as a Ref
-    /// * **If this Place is Ref, it shifts the Ref the correct number of spots. This may involve adding the given dtemp to 
-    ///   the one already in this Ref and will involve adding the given offset to the one already in this Ref**
+    /// * If this Place is Ref, it moves the thing this Ref points to into an ATemp and returns the ATemp as a Ref
     /// 
-    /// If `!(self.is_array() || self.is_struct())`, then 
-    /// * **If this Place is DTemp, it moves the DTemp into an ATemp and returns that ATemp as a Ref**
-    /// * If this Place is ATemp, it returns it as a Ref
-    /// * If this Place is Var, it moves the location of the Var to an ATemp and returns the ATemp as a Ref
-    /// * **If this Place is Ref, it moves the thing this Ref points to into an ATemp and returns the ATemp as a Ref**
-    /// 
-    /// If the type of this Place is not indexable, this function will return an Err
+    /// This function will return Err if
+    /// * the type of this Place is not indexable
+    /// * The `self` is DTemp and `self.is_array() || self.is_struct()`
     pub fn index_into(self, d: Option<DTemp>, mut off: i32, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
         let tt;
         let mut is_array = None;
@@ -860,9 +862,10 @@ impl Place {
                 // Right now, this function receives a field index, gets the name
                 // of the field from the Struct TypeType, and gets the absolute offset
                 // from the Struct Type from the Environment. 
+                // It should be like this:
                 // Either the struct layout should be stored in the Struct TypeType 
                 // or this function should receive the name of the field
-                // or this function should receive an absolute offset and a return TypeType.
+                // or this function should receive an absolute offset and TypeType to return.
                 if off as usize >= fields.len() {
                     return Err(format!("Invalid field index {} for struct {}", off, name));
                 }
@@ -888,6 +891,11 @@ impl Place {
                 return Err(format!("Struct {} not fully initialized with fields", name));
             }
         };
+        if let Some(len) = is_array {
+            if off >= len {
+                warn!("Array has length {} but is being indexed with literal {}", len, off);
+            }
+        }
         if !is_struct {
             let size = tt.get_size(env);
             match d {
@@ -902,26 +910,10 @@ impl Place {
             off *= size as i32;
         }
         match self {
-            Place::ATemp(atemp, _) => Ok(Place::Ref(atemp, d, off, tt.clone())),
+            Place::ATemp(atemp) => Ok(Place::Ref(atemp, d, off, tt.clone())),
             Place::DTemp(d_, _) => {
                 if is_struct || is_array != None {
-                    if let Some(d) = d {
-                        let d_place = Place::DTemp(d, TypeType::Id("i32".to_owned()));
-                        let instr = InterInstr::Binopi(Imm::Word(8), BudBinop::Times, d_place);
-                        instrs.push(instr);
-                        let instr = InterInstr::Lsr(d, d_);
-                        instrs.push(instr);
-                    } else if let Some(len) = is_array {
-                        if off >= len {
-                            warn!("Array has length {} but is being indexed with literal {}", len, off);
-                        }
-                    }
-                    if off != 0 {
-                        off *= 8;
-                        let instr = InterInstr::Lsri(Imm::LWord(off), d_);
-                        instrs.push(instr);
-                    }
-                    Ok(Place::DTemp(d_, tt))
+                    Err(format!("Cannot store structs or arrays in data registers"))
                 } else {
                     Ok(Place::Ref(Self::d_to_a(d_, tt.clone(), instrs, fienv, env)?, d, off, tt.clone()))
                 }
@@ -945,16 +937,17 @@ impl Place {
                 } else {
                     // We actually want to index into the thing this Ref is pointing to
                     // which must be a pointer, since !(is_struct || is_array)
-                    let a_place = Place::ATemp(a, tt.clone());
+                    let a_place = Place::ATemp(a);
                     let size = DataSize::LWord;
                     let instr = InterInstr::Move(size, self, a_place);
+                    if let Some(d_) = d_ { fienv.free_data_temp(d_); }
                     instrs.push(instr);
                     Ok(Place::Ref(a, d, off, tt))
                 }
             }
             Place::Var(Field { name, tt: _ }) => {
                 let a = fienv.get_addr_temp(env)?;
-                let a_place = Place::ATemp(a, tt.clone());
+                let a_place = Place::ATemp(a);
                 let instr = InterInstr::MoVA(name, a_place);
                 instrs.push(instr);
                 Ok(Place::Ref(a, d, off, tt))
@@ -963,13 +956,11 @@ impl Place {
     }
     pub fn free(&self, fienv: &mut FunctionInterEnvironment) {
         match self {
-            Place::ATemp(a, _) => fienv.free_addr_temp(*a),
+            Place::ATemp(a) => fienv.free_addr_temp(*a),
             Place::DTemp(d, _) => fienv.free_data_temp(*d),
             Place::Ref(a, d, _, _) => {
                 fienv.free_addr_temp(*a);
-                if let Some(d) = d {
-                    fienv.free_data_temp(*d);
-                }
+                if let Some(d) = d { fienv.free_data_temp(*d); }
             }
             Place::Var(_) => {}
         }
@@ -1020,7 +1011,7 @@ impl std::fmt::Display for Place {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", match self {
             Place::Var(field) => field.to_string(),
-            Place::ATemp(atemp, tt) => format!("{} A{}", tt, atemp),
+            Place::ATemp(atemp) => format!("A{}", atemp),
             Place::DTemp(dtemp, tt) => format!("{} D{}", tt, dtemp),
             Place::Ref(a, d, offset, tt) => {
                 match d {
@@ -1046,8 +1037,9 @@ pub enum ReturnPlan {
     None,
 }
 impl ReturnPlan {
-    // Return None if there is no return plan
-    pub fn into_inter_instr(self, from: Place, env: &Environment) -> Result<Option<Vec<InterInstr>>, String> {
+    /// Returns None if there is no return plan.
+    /// Frees this place
+    pub fn into_inter_instr(self, from: Place, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Option<Vec<InterInstr>>, String> {
         match self {
             ReturnPlan::Binop(b, to) => {
                 let instr = InterInstr::Binop(
@@ -1057,7 +1049,8 @@ impl ReturnPlan {
                             return Err(format!("Trying to do binop {} on type {}", b, to.get_type()));
                         }
                     },
-                    from, b, to);
+                    from.clone(), b, to);
+                from.free(fienv);
                 Ok(Some(vec![instr]))
             }
             ReturnPlan::Move(to) => Ok(Some(InterInstr::move_mem(from, to, env))),
@@ -1065,7 +1058,8 @@ impl ReturnPlan {
             ReturnPlan::None => Ok(None),
         }
     }
-    // Return None if there is no return plan
+    /// Returns None if there is no return plan
+    /// Pass a size of LWord if it doesn't matter. This function will coerce the size to the one the plan requires.
     pub fn imm_into_inter_instr(self, from: Imm, env: &Environment) -> Result<Option<InterInstr>, String> {
         match self {
             ReturnPlan::Binop(b, to) => {
@@ -1079,7 +1073,7 @@ impl ReturnPlan {
                 Ok(Some(instr))
             }
             ReturnPlan::Push(tt) => {
-                let instr = InterInstr::Pushi(from, tt);
+                let instr = InterInstr::Pusi(from, tt);
                 Ok(Some(instr))
             }
             ReturnPlan::None => Ok(None),
@@ -1094,6 +1088,15 @@ impl ReturnPlan {
             None => Err(format!("Magic type {} has invalid size, {}", to.get_type(), to.get_size(env))),
         }
     }
+    /// Returns tye type you are expected to give to this plan. If the plan is None, then this function returns None.
+    pub fn get_type(&self) -> Option<TypeType> {
+        match self {
+            ReturnPlan::Binop(_, place) => Some(place.get_type()),
+            ReturnPlan::Move(place) => Some(place.get_type()),
+            ReturnPlan::Push(tt) => Some(tt.clone()),
+            ReturnPlan::None => None,
+        }
+    }
 }
 
 // I am using these Intermediate Instructions to represent 
@@ -1102,17 +1105,24 @@ impl ReturnPlan {
 pub enum InterInstr {
     Binop(DataSize, Place, BudBinop, Place),    // Dest. on right (SUB subtracts src from dest. and stores in dest.; DIV, too)
     Binopi(Imm, BudBinop, Place),
+    Neg(DTemp, DataSize),
+    Bnot(DTemp, DataSize),                      // Boolean NOT--not bitwise NOT
     Move(DataSize, Place, Place),
+    MoVA(String, Place),                        // Move Var Address
     Movi(Imm, Place),
-    MoVA(String, Place),    // Move Var Address
+    Movs(usize, Place),                         // Move string literal (by the string literal's global label)
+    Lea(ATemp, Option<DTemp>, i32, ATemp),      // Load effective address into an address register
     Push(Place),
-    Pushi(Imm, TypeType),
-    MoveSP(i32),    // for calling functions
+    PuVA(String),
+    Pusi(Imm, TypeType),                        // Do we really need the TypeType for an Imm?
+    Puss(usize),                                // Push string literal (by the string literal's global label)
+    Pea(ATemp, Option<DTemp>, i32),             // Push effective address onto stack
+    MoveSP(i32),                                // for calling functions
     Call(String),
     Lbl(usize),
     Goto(usize),
-    Lsr(DTemp, DTemp),
-    Lsri(Imm, DTemp),
+    Lsr(DTemp, DataSize, DTemp, DataSize),
+    Lsri(Imm, DTemp, DataSize),
     Bcc(usize),
     Bcs(usize),
     Beq(usize),
@@ -1143,6 +1153,7 @@ impl InterInstr {
 
 pub struct FunctionInterEnvironment {
     pub vars: HashMap<String, (Field, bool)>,
+    pub lit_strings: Vec<(usize, String)>,
     // dtemps and atemps can only hold variables up to 4 bytes
     // Variables greater than 4 bytes must be stored in vars.
     // They cannot be returned from expressions (until that is 
@@ -1159,6 +1170,7 @@ impl FunctionInterEnvironment {
                 .iter()
                 .map(|f| (f.name.clone(), (f.clone(), true)))
                 .collect(),
+            lit_strings: Vec::new(),
             dtemps: Vec::new(),
             atemps: Vec::new(),
         }
@@ -1166,26 +1178,30 @@ impl FunctionInterEnvironment {
     pub fn var_name_from_temp(temp: usize) -> String {
         format!("[t{}]", temp)
     }
-    // Data temps are stored in dtemps
+    /// Data temps are stored in dtemps.
+    /// Data temps compile to data registers, so this function fails if the given type is a large type (size > 4 bytes).
+    /// Arrays and structs cannot be stored in data registers, either, so this function will fail if the given type array or struct.
+    /// However, it is not the case that only magic types can be stored in data temps, since pointers are not magic.
     pub fn get_data_temp(&mut self, tt: TypeType, env: &Environment) -> Result<usize, String> {
+        if tt.is_array() || tt.is_struct() {
+            return Err(format!("Cannot store arrays or structs in data temps. TypeType {} given", tt));
+        }
         let size = match env.types.get(&tt) {
-            Some(typ) => typ.get_size(),
+            Some(typ) => {
+                typ.get_size()
+            },
             None => return Err(format!("Invalid typetype found: {}", tt)),
         };
-        if size <= BudExpander::REG_SIZE {
-            // If a data temp is available, give it out
-            for (temp, used) in self.dtemps.iter_mut().enumerate() {
-                if !*used {
-                    *used = true;
-                    return Ok(temp);
-                }
+        // If a data temp is available, give it out
+        for (temp, used) in self.dtemps.iter_mut().enumerate() {
+            if !*used {
+                *used = true;
+                return Ok(temp);
             }
-            let place = self.dtemps.len();
-            self.dtemps.push(true);
-            Ok(place)
-        } else {
-            Err(format!("Cannot create data temp for large type {}", tt))
         }
+        let place = self.dtemps.len();
+        self.dtemps.push(true);
+        Ok(place)
     }
     // Addr temps can point to anything
     pub fn get_addr_temp(&mut self, env: &Environment) -> Result<usize, String> {
@@ -1200,16 +1216,19 @@ impl FunctionInterEnvironment {
         self.atemps.push(true);
         Ok(place)
     }
-    fn _free_temp(temps: &mut Vec<bool>, temp: usize) {
+    fn _free_temp(temps: &mut Vec<bool>, temp: usize, label: &str) {
         if temp < temps.len() {
+            if temps[temp] {
+                warn!("Trying to free {}{}, which is already freed", label, temp);
+            }
             temps[temp] = false;
         }
     }
     pub fn free_data_temp(&mut self, dtemp: DTemp) {
-        Self::_free_temp(&mut self.dtemps, dtemp)
+        Self::_free_temp(&mut self.dtemps, dtemp, "D")
     }
     pub fn free_addr_temp(&mut self, atemp: ATemp) {
-        Self::_free_temp(&mut self.atemps, atemp)
+        Self::_free_temp(&mut self.atemps, atemp, "A")
     }
     // Saves all used regs by pushing them to the stack
     pub fn save_regs(instrs: &mut Vec<InterInstr>) -> Vec<ADReg> {
@@ -1218,6 +1237,11 @@ impl FunctionInterEnvironment {
     // Retrieves saved regs from the stack
     pub fn retrieve_regs(regs: Vec<ADReg>, instrs: &mut Vec<InterInstr>) {
         todo!()
+    }
+    pub fn add_lit_string(&mut self, string: String, label_gen: &mut RangeFrom<usize>) -> usize {
+        let ind = label_gen.next().unwrap();
+        self.lit_strings.push((ind, string));
+        ind
     }
 
 }
@@ -1302,7 +1326,7 @@ impl Function {
                         let plan = ReturnPlan::Binop(b, t_place.clone());
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
                         let ret_action = ReturnPlan::Binop(pb, place)
-                            .into_inter_instr(t_place.clone(), env)?;
+                            .into_inter_instr(t_place.clone(), fienv, env)?;
                         fienv.free_data_temp(temp);
                         match ret_action {
                             Some(mut ret_instrs) => instrs.append(&mut ret_instrs),
@@ -1396,7 +1420,7 @@ impl Function {
         let place = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
         let assign_plan = ReturnPlan::Move(place.clone());
         Self::compile_expr(expr, assign_plan, instrs, label_gen, fienv, env)?;
-        match plan.into_inter_instr(place.clone(), env)? {
+        match plan.into_inter_instr(place.clone(), fienv, env)? {
             Some(mut plan_instrs) => instrs.append(&mut plan_instrs),
             None => {}
         };
@@ -1421,22 +1445,243 @@ impl Function {
     }
     pub fn compile_id_expr(id: IdExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         let place = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
-        match plan.into_inter_instr(place, env)? {
-            Some(mut instr) => instrs.append(&mut instr),
+        match plan.into_inter_instr(place, fienv, env)? {
+            Some(mut instr) => {
+                instrs.append(&mut instr);
+            },
             None => {},
         };
         Ok(())
     }
     pub fn compile_lit_expr(lit: Literal, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: LitExpr");
+        match lit {
+            Literal::Num(num) => {
+                let instr = plan.imm_into_inter_instr(Imm::LWord(num), env)?;
+                if let Some(instr) = instr {
+                    instrs.push(instr);
+                }
+            }
+            Literal::Str(string) => {
+                let str_ind = fienv.add_lit_string(string.clone(), label_gen);
+                match plan {
+                    ReturnPlan::Move(to) => {
+                        let instr = InterInstr::Movs(str_ind, to);
+                        instrs.push(instr);
+                    }
+                    ReturnPlan::Push(tt) => {
+                        let instr = InterInstr::Puss(str_ind);
+                        instrs.push(instr);
+                    }
+                    ReturnPlan::Binop(b, _) =>  {
+                        return Err(format!("Cannot do binary operation {} on string literal \"{}\"", b, string));
+                    }
+                    ReturnPlan::None => {}
+                }
+            }
+        }
         Ok(())
     }
     pub fn compile_paren_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         warn!("Not implemented: ParenExpr");
         Ok(())
     }
-    pub fn compile_unary_expr(un: BudUnop, expr: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: UnaryExpr");
+    pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        // nbe needs to be an IdExpr
+        if let NonBinExpr::IdExpr(id_expr) = nbe {
+            let place = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
+            if let ReturnPlan::Binop(b, _) = plan {
+                return Err(format!("Binop {} not supported with references yet", b));
+            }
+            match place {
+                Place::Var(field) => {
+                    match plan {
+                        ReturnPlan::Binop(_, _) => {
+                            panic!("Binop should be handled above in this function")
+                        }
+                        ReturnPlan::Move(to) => {
+                            let instr = InterInstr::MoVA(field.name, to);
+                            instrs.push(instr);
+                            return Ok(());
+                        },
+                        ReturnPlan::Push(tt) => {
+                            if tt != field.tt {
+                                return Err(format!("Cannot convert {} to {}", field.tt, tt));
+                            }
+                            let instr = InterInstr::PuVA(field.name);
+                            instrs.push(instr);
+                            return Ok(());
+                        },
+                        ReturnPlan::None => {
+                            // No return plan
+                            return Ok(());
+                        },
+                    }
+                }
+                Place::ATemp(a) => {
+                    return Err(format!("Cannot get reference to temporary address register A{}", a));
+                },
+                Place::DTemp(d, tt) => {
+                    return Err(format!("Cannot get reference to temporary data register {} D{}", tt, d));
+                },
+                Place::Ref(a, d, off, tt) => {
+                    match plan {
+                        ReturnPlan::Binop(_, _) => {
+                            panic!("Binop should be handled above in this function")
+                        }
+                        ReturnPlan::Move(to) => {
+                            match &to {
+                                Place::ATemp(to_a) => {
+                                    // Move from Ref to ATemp
+                                    let instr = InterInstr::Lea(a, d, off, *to_a);
+                                    instrs.push(instr);
+                                    fienv.free_addr_temp(a);
+                                    if let Some(d) = d { fienv.free_data_temp(d); }
+                                    return Ok(());
+                                }
+                                Place::DTemp(to_d, to_tt) => {
+                                    // Move from Ref to ATemp to DTemp
+                                    if let TypeType::Pointer(to_val_tt) = &to_tt {
+                                        if tt == **to_val_tt {
+                                            let instr = InterInstr::Lea(a, d, off, a);
+                                            instrs.push(instr);
+                                            let a_place = Place::ATemp(a);
+                                            let instr = InterInstr::Move(DataSize::LWord, a_place, to);
+                                            instrs.push(instr);
+                                            fienv.free_addr_temp(a);
+                                            if let Some(d) = d { fienv.free_data_temp(d); }
+                                            return Ok(())
+                                        } else {
+                                            return Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt));
+                                        }
+                                    } else {
+                                        return Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                            Place::Ref(a, d, off, tt),
+                                            to_tt
+                                        ));
+                                    }
+                                }
+                                Place::Var(field) => {
+                                    // Move from Ref to Var
+                                    if let TypeType::Pointer(to_val_tt) = &field.tt {
+                                        if tt == **to_val_tt {
+                                            let instr = InterInstr::Lea(a, d, off, a);
+                                            instrs.push(instr);
+                                            let a_place = Place::ATemp(a);
+                                            let instr = InterInstr::Move(DataSize::LWord, a_place, to);
+                                            instrs.push(instr);
+                                            fienv.free_addr_temp(a);
+                                            if let Some(d) = d { fienv.free_data_temp(d); }
+                                            return Ok(())
+                                        } else {
+                                            return Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt));
+                                        }
+                                    } else {
+                                        return Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                            Place::Ref(a, d, off, tt),
+                                            field.tt
+                                        ));
+                                    }
+                                }
+                                Place::Ref(_, _, _, to_tt) => {
+                                    // Move effective address from Ref to Ref
+                                    // Remember that we are moving the effective address OUT of self,
+                                    // but we are moving TO the thing pointed to by the plan's Ref.
+                                    if let TypeType::Pointer(to_val_tt) = &to_tt {
+                                        if tt == **to_val_tt {
+                                            let instr = InterInstr::Lea(a, d, off, a);
+                                            instrs.push(instr);
+                                            let a_place = Place::ATemp(a);
+                                            let instr = InterInstr::Move(DataSize::LWord, a_place, to);
+                                            instrs.push(instr);
+                                            fienv.free_addr_temp(a);
+                                            if let Some(d) = d { fienv.free_data_temp(d); }
+                                            return Ok(())
+                                        } else {
+                                            return Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt));
+                                        }
+                                    } else {
+                                        return Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                            Place::Ref(a, d, off, tt),
+                                            to_tt
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        ReturnPlan::Push(to_tt) => {
+                            if let TypeType::Pointer(to_val_tt) = &to_tt {
+                                if tt == **to_val_tt {
+                                    let instr = InterInstr::Pea(a, d, off);
+                                    instrs.push(instr);
+                                    fienv.free_addr_temp(a);
+                                    if let Some(d) = d { fienv.free_data_temp(d); }
+                                    return Ok(())
+                                } else {
+                                    return Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt));
+                                }
+                            } else {
+                                return Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                    Place::Ref(a, d, off, tt),
+                                    to_tt
+                                ));
+                            }
+                        }
+                        ReturnPlan::None => {
+                            fienv.free_addr_temp(a);
+                            if let Some(d) = d { fienv.free_data_temp(d); }
+                            Ok(())
+                        }
+                    }
+                },
+            }
+        } else {
+            Err(format!("Cannot get reference to non-IdExpr"))
+        }
+    }
+    pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        let tt = plan.get_type();
+        if let BudUnop::Ref = un {
+            return Self::get_reference(nbe, plan, instrs, label_gen, fienv, env);
+        }
+        let plan2;
+        let mut dtemp = None;
+        if let Some(tt) = &tt {
+            if !tt.is_magic(env) {
+                return Err(format!("Cannot return non-magic type {} from unary operator", tt));
+            }
+            let dtemp_ = fienv.get_data_temp(tt.clone(), env)?;
+            dtemp = Some(dtemp_);
+            let place = Place::DTemp(dtemp_, tt.clone());
+            plan2 = ReturnPlan::Move(place);
+        } else {
+            // We were not given a return plan. Just evaluate the unary expression, but give ReturnPlan::None to the subexpression
+            plan2 = ReturnPlan::None;
+        }
+        Self::compile_non_bin_expr(nbe, plan2, instrs, label_gen, fienv, env)?;
+        if let Some(dtemp) = dtemp {
+            match un {
+                BudUnop::Neg => {
+                    let ds = tt
+                        .unwrap()       // if dtemp is Some, then tt is Some
+                        .get_data_size(env)
+                        .unwrap();              // tt is magic, so it has a DataSize 
+                    let instr = InterInstr::Neg(dtemp, ds);
+                    instrs.push(instr);
+                }
+                BudUnop::Not => {
+                    let ds = tt
+                        .unwrap()       // if dtemp is Some, then tt is Some
+                        .get_data_size(env)
+                        .unwrap();              // tt is magic, so it has a DataSize 
+                    let instr = InterInstr::Bnot(dtemp, ds);
+                    instrs.push(instr);
+                }
+                BudUnop::Ref => {
+                    panic!("Ref should be handled above in this function")
+                }
+            }
+            fienv.free_data_temp(dtemp);
+        }
         Ok(())
     }
     pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
@@ -1563,7 +1808,7 @@ impl Function {
                 // We need to store the result of expr into the memory
                 // location pointed to by the variable, id
                 let place = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
-                Ok(place)
+                Ok(place.index_into(None, 0, instrs, fienv, env)?)
             },
         }
     }

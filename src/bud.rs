@@ -4,7 +4,7 @@ use crate::grammar;
 
 grammar::grammar!(
     BudTerminal: {
-        #[regex("[0-9]+")]
+        #[regex("-?[0-9]+")]
         NumGen,
         #[regex(r#""([^"]*)""#)]
         StrGen,
@@ -48,7 +48,7 @@ grammar::grammar!(
         Import,
         #[token("return")]
         Return,
-        #[token("cleanum")]
+        #[token("cleanup")]
         Cleanup,
         #[token("do")]
         Do,
@@ -359,7 +359,6 @@ impl BudBinop {
 pub enum BudUnop {
     Not,
     Neg,
-    Deref,
     Ref,
 }
 impl Display for BudUnop {
@@ -370,8 +369,7 @@ impl Display for BudUnop {
             match self {
                 BudUnop::Not => "!",
                 BudUnop::Neg => "-",
-                BudUnop::Deref => "*",
-                BudUnop::Ref => "&",
+                BudUnop::Ref => "@",
             }
         )
     }
@@ -386,7 +384,6 @@ impl BudUnop {
         match u {
             BudTerminal::Not => Ok(BudUnop::Not),
             BudTerminal::Minus => Ok(BudUnop::Neg),
-            BudTerminal::Star => Ok(BudUnop::Deref),
             BudTerminal::Reference => Ok(BudUnop::Ref),
             _ => Err(format!("Invalid unop: {}", u)),
         }
