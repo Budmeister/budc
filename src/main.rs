@@ -31,72 +31,87 @@ use colored::Colorize;
 static LOGGER: SimpleLogger = SimpleLogger;
 
 fn get_logging_options(args: &HashSet<String>, log_options: &mut LoggingOptions) {
-    if args.contains("print_log_options") {
+    if args.contains("-print_log_options") {
         log_options.print_log_options = true;
     } else if args.contains("!print_log_options") {
         log_options.print_log_options = false;
     }
-    if args.contains("print_grammar") {
+    if args.contains("-print_grammar") {
         log_options.print_grammar = true;
     } else if args.contains("!print_grammar") {
         log_options.print_grammar = false;
     }
-    if args.contains("print_firsts") {
+    if args.contains("-print_firsts") {
         log_options.print_firsts = true;
     } else if args.contains("!print_firsts") {
         log_options.print_firsts = false;
     }
-    if args.contains("print_firsts_actions") {
+    if args.contains("-print_firsts_actions") {
         log_options.print_firsts_actions = true;
     } else if args.contains("!print_firsts_actions") {
         log_options.print_firsts_actions = false;
     }
-    if args.contains("print_state_transitions") {
+    if args.contains("-print_state_transitions") {
         log_options.print_state_transitions = true;
     } else if args.contains("!print_state_transitions") {
         log_options.print_state_transitions = false;
     }
-    if args.contains("print_states") {
+    if args.contains("-print_states") {
         log_options.print_states = true;
     } else if args.contains("!print_states") {
         log_options.print_states = false;
     }
-    if args.contains("print_action_table") {
+    if args.contains("-print_action_table") {
         log_options.print_action_table = true;
     } else if args.contains("!print_action_table") {
         log_options.print_action_table = false;
     }
-    if args.contains("print_actions") {
+    if args.contains("-print_actions") {
         log_options.print_actions = true;
     } else if args.contains("!print_actions") {
         log_options.print_actions = false;
     }
-    if args.contains("print_syntax_tree") {
+    if args.contains("-print_syntax_tree") {
         log_options.print_syntax_tree = true;
     } else if args.contains("!print_syntax_tree") {
         log_options.print_syntax_tree = false;
+    }
+    if args.contains("-print_types_trace") {
+        log_options.print_types_trace = true;
+    } else if args.contains("!print_types_trace") {
+        log_options.print_types_trace = false;
+    }
+    if args.contains("-print_types") {
+        log_options.print_types = true;
+    } else if args.contains("!print_types") {
+        log_options.print_types = false;
+    }
+    if args.contains("-print_inter_funcs") {
+        log_options.print_inter_funcs = true;
+    } else if args.contains("!print_inter_funcs") {
+        log_options.print_inter_funcs = false;
     }
 
 }
 
 fn get_logging_level(args: &HashSet<String>) -> log::LevelFilter {
     use log::LevelFilter::*;
-    if args.contains("off") {
+    if args.contains("-off") {
         println!("Logging level of off received");
         Off
-    } else if args.contains("trace") {
+    } else if args.contains("-trace") {
         println!("Logging level of trace received");
         Trace
-    } else if args.contains("debug") {
+    } else if args.contains("-debug") {
         println!("Logging level of debug received");
         Debug
-    } else if args.contains("info") {
+    } else if args.contains("-info") {
         println!("Logging level of info received");
         Info
-    } else if args.contains("warn") {
+    } else if args.contains("-warn") {
         println!("Logging level of warn received");
         Warn
-    } else if args.contains("error") {
+    } else if args.contains("-error") {
         println!("Logging level of error received");
         Error
     } else {
@@ -132,6 +147,9 @@ fn main() {
         print_action_table: false,
         print_actions: false,
         print_syntax_tree: false,
+        print_types_trace: false,
+        print_types: false,
+        print_inter_funcs: false,
     };
     get_logging_options(&args, &mut log_options);
     if log_options.print_log_options {

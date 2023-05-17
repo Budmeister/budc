@@ -4,7 +4,8 @@ i32 fun(i32[3] a, i32 b, @(i32) c) {
     c = @a[2];
     b = -b;
     b = b + *c;
-    0
+    i8 d = 1;
+    return d - 1;
 }
 
 struct my_struct {

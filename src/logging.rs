@@ -39,6 +39,9 @@ pub struct LoggingOptions {
     pub print_action_table: bool,
     pub print_actions: bool,
     pub print_syntax_tree: bool,
+    pub print_types_trace: bool,
+    pub print_types: bool,
+    pub print_inter_funcs: bool,
 }
 
 

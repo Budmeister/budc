@@ -198,7 +198,6 @@ impl BudExpander {
                 tree
             ));
         }
-        trace!("Building Item list");
         let items = bud::Item::news(&children)?;
 
         let mut funcs = Vec::new();
@@ -220,19 +219,23 @@ impl BudExpander {
         }
 
         let built_in = Self::get_built_in_types();
-        let (environment, funcs) = Environment::new(structs, built_in, funcs)?;
-
-        debug!("Types found: ");
-        environment.types
-            .iter()
-            .for_each(|(_, typ)| {
-                debug!("\t{}", typ);
-            });
-        debug!("End types found");
+        let (environment, funcs) = Environment::new(log_options, structs, built_in, funcs)?;
+        
+        if log_options.print_types {
+            debug!("Types found: ");
+            environment.types
+                .iter()
+                .for_each(|(_, typ)| {
+                    debug!("\t{}", typ);
+                });
+            debug!("End types found");
+        }
         let mut num_errors = 0;
-        trace!("Funcs: {:?}", funcs.iter().map(|x| x.0.to_owned()).collect::<Vec<String>>());
+        if log_options.print_inter_funcs {
+            debug!("Funcs: {:?}", funcs.iter().map(|x| x.0.to_owned()).collect::<Vec<String>>());
+        }
         for (name, func) in funcs {
-            match func.compile(0.., &environment) {
+            match func.compile(log_options, 0.., &environment) {
                 Ok(_) => {},
                 Err(msg) => {
                     error!("In function {},", name);
@@ -240,6 +243,9 @@ impl BudExpander {
                     num_errors += 1;
                 }
             };
+        }
+        if log_options.print_inter_funcs {
+            debug!("End inter funcs");
         }
         if num_errors != 0 {
             return Err(format!("Unable to compile all functions because of errors in {} functions", num_errors));
@@ -325,7 +331,6 @@ impl TypeSizeGenerator {
                     TypeType::Array(subtyp, len) => {
                         let subtyp_clone = (&**subtyp).clone();
                         let len = *len;
-                        trace!("Getting size for array type {}", subtyp);
                         let (Choice::Some(subsize) | Choice::Other((subsize, _))) = Self::get_size(size_generators, subtyp_clone, top)?;
                         size_generators.get_mut(&index).unwrap().state =
                             TypeSizeState::Calculated(Choice::Some(subsize * len as u32));
@@ -387,11 +392,14 @@ impl Environment {
     // This is the only chance to add raw types
     // This function also creates the Function objects
     pub fn new(
+        log_options: &LoggingOptions,
         structs: Vec<(String, Vec<VarDecl>)>,
         mut built_in: HashMap<TypeType, Type>,
         funcs: Vec<(VarDecl, Vec<VarDecl>, Box<Expr>)>,
     ) -> Result<(Environment, Vec<(String, Function)>), String> {
-        debug!("Types:");
+        if log_options.print_types_trace {
+            debug!("Types:");
+        }
         // Get the names (TypeTypes) for all types so that
         // Type objects can be created later
         let mut struct_names = HashSet::new();
@@ -423,11 +431,13 @@ impl Environment {
             typetypes.insert(field);
         }
 
-        debug!("Struct types: {}", typetypes.to_string());
-        debug!("Built-in types: {}", crate::tools::to_string(&built_in));
         let types_in_functions: HashSet<TypeType> =
             BudExpander::get_types_in_funcs(&funcs, &struct_names, &built_in)?;
-        debug!("Types in functions: {}", &types_in_functions.to_string());
+        if log_options.print_types_trace {
+            debug!("Struct types: {}", typetypes.to_string());
+            debug!("Built-in types: {}", crate::tools::to_string(&built_in));
+            debug!("Types in functions: {}", &types_in_functions.to_string());
+        }
         // Generate the sizes of all types
         // structs, built-ins, and types used in functions
         let mut size_generators = typetypes
@@ -445,12 +455,16 @@ impl Environment {
                     .map(|typtyp| (typtyp.clone(), TypeSizeGenerator::new(typtyp))),
             )
             .collect::<HashMap<TypeType, TypeSizeGenerator>>();
-        debug!("Size generators: {}", crate::tools::to_string(&size_generators));
+        if log_options.print_types_trace {
+            debug!("Size generators: {}", crate::tools::to_string(&size_generators));
+        }
         
         for tt in size_generators.keys().map(|tt| tt.clone()).collect::<Vec<TypeType>>() {
             TypeSizeGenerator::get_size(&mut size_generators, tt.clone(), tt)?;
         }
-        debug!("Size generators after get_size: {}", crate::tools::to_string(&size_generators));
+        if log_options.print_types_trace {
+            debug!("Size generators after get_size: {}", crate::tools::to_string(&size_generators));
+        }
 
         // Create Type objects
         let types = size_generators
@@ -501,7 +515,9 @@ impl Environment {
             })
             .collect::<Result<Vec<(String, Function)>, String>>()?;
 
-        debug!("End types");
+        if log_options.print_types_trace {
+            debug!("End types");
+        }
         Ok((env, funcs))
     }
 
@@ -518,14 +534,6 @@ impl Environment {
             }
         }
         (layout, position)
-    }
-
-    pub fn compile(self, funcs: Vec<Function>, env: &Environment) -> Result<CompiledEnvironment, String> {
-        Ok(CompiledEnvironment { types: self.types, funcs: funcs
-            .into_iter()
-            .map(|func| func.compile(0.., env))
-            .collect::<Result<Vec<CompiledFunction>, String>>()?
-        })
     }
 }
 
@@ -973,35 +981,19 @@ impl Place {
             }
         }
     }
-    fn is_struct(&self) -> bool {
-        if let TypeType::Struct(_, _) = self.get_type() {
-            true
-        } else {
-            false
-        }
+    pub fn is_struct(&self) -> bool {
+        self.get_type().is_struct()
     }
-    fn is_pointer(&self) -> bool {
-        if let TypeType::Pointer(_) = self.get_type() {
-            true
-        } else {
-            false
-        }
+    pub fn is_pointer(&self) -> bool {
+        self.get_type().is_pointer()
     }
-    fn is_array(&self) -> bool {
-        if let TypeType::Array(_, _) = self.get_type() {
-            true
-        } else {
-            false
-        }
+    pub fn is_array(&self) -> bool {
+        self.get_type().is_array()
     }
-    fn is_id(&self) -> bool {
-        if let TypeType::Id(_) = self.get_type() {
-            true
-        } else {
-            false
-        }
+    pub fn is_id(&self) -> bool {
+        self.get_type().is_id()
     }
-    fn is_void(&self) -> bool {
+    pub fn is_void(&self) -> bool {
         self.get_type() == TypeType::Id("void".to_owned())
     }
 }
@@ -1032,6 +1024,7 @@ pub enum ReturnPlan {
     Binop(BudBinop, Place), // Place must have a magic type
     Move(Place),
     Push(TypeType),
+    Return,
     None,
 }
 impl ReturnPlan {
@@ -1047,40 +1040,47 @@ impl ReturnPlan {
                 }
                 let instr = InterInstr::Binop(from.clone(), b, to);
                 instrs.push(instr);
+                from.free(fienv);
             }
             ReturnPlan::Move(to) => {
                 let instr = InterInstr::Move(from.clone(), to);
                 instrs.push(instr);
+                from.free(fienv);
             },
             ReturnPlan::Push(tt) => {
                 let instr = InterInstr::Push(from.clone(), tt);
                 instrs.push(instr);
+                from.free(fienv);
             }
-            ReturnPlan::None => {},
+            ReturnPlan::Return => fienv.ret(from.clone(), instrs, env)?,
+            ReturnPlan::None => {
+                from.free(fienv);
+            },
         }
-        from.free(fienv);
         Ok(())
     }
-    /// Returns None if there is no return plan
+    /// Has no effect if there is no return plan
     /// Pass a size of LWord if it doesn't matter. This function will coerce the size to the one the plan requires.
-    pub fn imm_into_inter_instr(self, from: Imm, env: &Environment) -> Result<Option<InterInstr>, String> {
+    pub fn imm_into_inter_instr(self, from: Imm, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match self {
             ReturnPlan::Binop(b, to) => {
                 let size = Self::get_imm_size(&from, &to, env)?;
                 let instr = InterInstr::Binopi(from.change_size(size), b, to);
-                Ok(Some(instr))
+                instrs.push(instr);
             }
             ReturnPlan::Move(to) => {
                 let size = Self::get_imm_size(&from, &to, env)?;
                 let instr = InterInstr::Movi(from.change_size(size), to);
-                Ok(Some(instr))
+                instrs.push(instr);
             }
             ReturnPlan::Push(tt) => {
-                let instr = InterInstr::Pusi(from, tt);
-                Ok(Some(instr))
+                let instr = InterInstr::Pusi(from.as_type(tt, env)?);
+                instrs.push(instr);
             }
-            ReturnPlan::None => Ok(None),
+            ReturnPlan::Return => fienv.reti(from, instrs, env)?,
+            ReturnPlan::None => {},
         }
+        Ok(())
     }
     fn get_imm_size(from: &Imm, to: &Place, env: &Environment) -> Result<DataSize, String> {
         if !to.get_type().is_magic(env) {
@@ -1091,12 +1091,13 @@ impl ReturnPlan {
             None => Err(format!("Magic type {} has invalid size, {}", to.get_type(), to.get_size(env))),
         }
     }
-    /// Returns tye type you are expected to give to this plan. If the plan is None, then this function returns None.
-    pub fn get_type(&self) -> Option<TypeType> {
+    /// Returns type type you are expected to give to this plan. If the plan is None, then this function returns None.
+    pub fn get_type(&self, fienv: &mut FunctionInterEnvironment) -> Option<TypeType> {
         match self {
             ReturnPlan::Binop(_, place) => Some(place.get_type()),
             ReturnPlan::Move(place) => Some(place.get_type()),
             ReturnPlan::Push(tt) => Some(tt.clone()),
+            ReturnPlan::Return => Some(fienv.return_type.clone()),
             ReturnPlan::None => None,
         }
     }
@@ -1117,7 +1118,7 @@ pub enum InterInstr {
     Lea(ATemp, Option<DTemp>, i32, ATemp),      // Load effective address into an address register
     Push(Place, TypeType),
     PuVA(String),
-    Pusi(Imm, TypeType),                        // Do we really need the TypeType for an Imm?
+    Pusi(Imm),                                  // Do we really need the TypeType for an Imm?
     Puss(usize),                                // Push string literal (by the string literal's global label)
     Pea(ATemp, Option<DTemp>, i32),             // Push effective address onto stack
     MoveSP(i32),                                // for calling functions
@@ -1143,8 +1144,13 @@ impl InterInstr {
 }
 
 pub struct FunctionInterEnvironment {
-    pub vars: HashMap<String, (Field, bool)>,
+    /// If this function returns an array or struct (even if its size < 4 bytes),
+    /// then an extra variable, `"[retval]"`, will be passed in
+    pub vars: Vec<Field>,
+    // (label number, string)
     pub lit_strings: Vec<(usize, String)>,
+    pub cleanup_label: Option<usize>,
+    pub return_type: TypeType,
     // dtemps and atemps can only hold variables up to 4 bytes
     // Variables greater than 4 bytes must be stored in vars.
     // They cannot be returned from expressions (until that is 
@@ -1155,13 +1161,15 @@ pub struct FunctionInterEnvironment {
     pub atemps: Vec<bool>,
 }
 impl FunctionInterEnvironment {
-    pub fn new(args: &Vec<Field>) -> FunctionInterEnvironment {
+    pub fn new(args: &Vec<Field>, return_type: TypeType) -> FunctionInterEnvironment {
         FunctionInterEnvironment {
             vars: args
                 .iter()
-                .map(|f| (f.name.clone(), (f.clone(), true)))
+                .map(|f| f.clone())
                 .collect(),
             lit_strings: Vec::new(),
+            cleanup_label: None,
+            return_type,
             dtemps: Vec::new(),
             atemps: Vec::new(),
         }
@@ -1173,16 +1181,10 @@ impl FunctionInterEnvironment {
     /// Data temps compile to data registers, so this function fails if the given type is a large type (size > 4 bytes).
     /// Arrays and structs cannot be stored in data registers, either, so this function will fail if the given type array or struct.
     /// However, it is not the case that only magic types can be stored in data temps, since pointers are not magic.
-    pub fn get_data_temp(&mut self, tt: TypeType, env: &Environment) -> Result<usize, String> {
+    pub fn get_data_temp(&mut self, tt: TypeType) -> Result<usize, String> {
         if tt.is_array() || tt.is_struct() {
             return Err(format!("Cannot store arrays or structs in data temps. TypeType {} given", tt));
         }
-        let size = match env.types.get(&tt) {
-            Some(typ) => {
-                typ.get_size()
-            },
-            None => return Err(format!("Invalid typetype found: {}", tt)),
-        };
         // If a data temp is available, give it out
         for (temp, used) in self.dtemps.iter_mut().enumerate() {
             if !*used {
@@ -1234,6 +1236,93 @@ impl FunctionInterEnvironment {
         self.lit_strings.push((ind, string));
         ind
     }
+    pub fn get_var(&self, name: &String) -> Option<Field> {
+        for field in &self.vars {
+            if field.name == *name {
+                return Some(field.clone());
+            }
+        }
+        None
+    }
+    pub fn has_var(&self, name: &String) -> bool {
+        if let Some(_) = self.get_var(name) {
+            true
+        } else {
+            false
+        }
+    }
+    pub fn add_var(&mut self, field: &Field) -> Result<(), String> {
+        if let Some(existing_field) = self.get_var(&field.name) {
+            if existing_field.tt == field.tt {
+                // Var already exists, so do nothing
+                Ok(())
+            } else {
+                // Var exists with a different type
+                Err(format!("Cannot create var {}, because var {} already exists", field, existing_field))
+            }
+        } else {
+            self.vars.push(field.clone());
+            Ok(())
+        }
+    }
+    pub fn get_cleanup_label(&mut self, label_gen: &mut RangeFrom<usize>) -> usize {
+        if let Some(label) = self.cleanup_label {
+            label
+        } else {
+            let label = label_gen.next().unwrap();
+            self.cleanup_label = Some(label);
+            label
+        }
+    }
+    pub fn ret(&mut self, place: Place, instrs: &mut Vec<InterInstr>, env: &Environment) -> Result<(), String> {
+        let tt = place.get_type();
+        if tt != self.return_type {
+            return Err(format!("Function has return type {} but tried to return object of type {}", self.return_type, tt));
+        }
+        let to;
+        if tt.is_array() || tt.is_struct() {
+            let field = Field { tt: TypeType::Pointer(Box::new(tt.clone())), name: "[retval]".to_owned() };
+            to = Place::Var(field).index_into(None, 0, instrs, self, env)?;
+        } else {
+            to = Place::DTemp(0, tt);
+        }
+        let instr = InterInstr::Move(place, to);
+        instrs.push(instr);
+        Ok(())
+    }
+    pub fn reti(&mut self, imm: Imm, instrs: &mut Vec<InterInstr>, env: &Environment) -> Result<(), String> {
+        let imm = imm.as_type(self.return_type.clone(), env)?;
+        let to = Place::DTemp(0, self.return_type.clone());
+        let instr = InterInstr::Movi(imm, to);
+        instrs.push(instr);
+        Ok(())
+    }
+    pub fn rets(&mut self, string: usize, instrs: &mut Vec<InterInstr>) -> Result<(), String> {
+        let tt = TypeType::Pointer(Box::new(TypeType::Id("i8".to_owned())));
+        if tt != self.return_type {
+            return Err(format!("Function has return type {} but tried to return literal string of type {}", self.return_type, tt));
+        }
+        let to = Place::DTemp(0, tt);
+        let instr = InterInstr::Movs(string, to);
+        instrs.push(instr);
+        Ok(())
+    }
+    pub fn retva(&mut self, name: &String, instrs: &mut Vec<InterInstr>) -> Result<(), String> {
+        let var = match self.get_var(&name) {
+            Some(name) => name,
+            None => {
+                return Err(format!("Trying to return pointer to local variable {} which does not exist", name));
+            }
+        };
+        let tt = TypeType::Pointer(Box::new(var.tt.clone()));
+        if tt != self.return_type {
+            return Err(format!("Function has return type {} but tried to return pointer to local variable {} of type {}", self.return_type, var.name, var.tt));
+        }
+        let to = Place::DTemp(0, tt);
+        let instr = InterInstr::MoVA(var.name, to);
+        instrs.push(instr);
+        Ok(())
+    }
 
 }
 
@@ -1260,17 +1349,18 @@ impl Function {
     pub fn get_name(&self) -> String {
         self.signature.name.name.to_owned()
     }
-    pub fn preable(&self, instructions: &mut Vec<Instruction>) {
-        todo!()
-    }
-    pub fn compile(self, mut label_gen: RangeFrom<usize>, env: &Environment) -> Result<CompiledFunction, String> {
+    pub fn compile(self, log_options: &LoggingOptions, mut label_gen: RangeFrom<usize>, env: &Environment) -> Result<CompiledFunction, String> {
         let mut instrs = Vec::new();
-        let mut fienv = FunctionInterEnvironment::new(&self.signature.args);
+        let mut fienv = FunctionInterEnvironment::new(&self.signature.args, self.signature.name.tt.clone());
         let plan;
         if self.signature.name.tt.is_void() {
             plan = ReturnPlan::None;
         } else if self.signature.name.tt.is_array() || self.signature.name.tt.is_struct() {
-            return Err(format!("Returning arrays and structs from functions not implemented. Pass a pointer to a local variable as an argument instead."));
+            let ret_field = Field { tt: TypeType::Pointer(Box::new(self.signature.name.tt.clone())), name: "[retval]".to_owned() };
+            fienv.add_var(&ret_field)?;
+            // Manually add code at the end that will move the return value to the thing pointed to by [retval]
+            // Do this by calling `fienv.ret(place, instrs)`
+            plan = ReturnPlan::None;
         } else {
             plan = ReturnPlan::Move(Place::DTemp(0, self.signature.name.tt.clone()));
         }
@@ -1285,9 +1375,11 @@ impl Function {
         // Things we need to know (from searching the function expression):
         //  * String literals
         //  * All local variables (can be Fields)
-        trace!("Instructions for function {}", self.signature.name.name);
-        for instr in &instrs {
-            trace!("{:?}", instr);
+        if log_options.print_inter_funcs {
+            debug!("Instructions for function {}", self.signature.name.name);
+            for instr in &instrs {
+                debug!("\t{:?}", instr);
+            }
         }
         todo!()
     }
@@ -1304,13 +1396,14 @@ impl Function {
     pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match be {
             BinExpr::Binary(nbe, b, be) => {
-                match plan {
-                    ReturnPlan::Binop(pb, place) => {
+                let retreg = Place::DTemp(0, fienv.return_type.clone());
+                match (plan, fienv.return_type.is_array() || fienv.return_type.is_struct(), retreg) {
+                    (ReturnPlan::Binop(pb, place), _, _) => {
                         // Make the temporary variable with the same type as the ReturnPlan
                         // As a future optimization, we do not need to get a new place if
                         // both binops are the same and if the binop is associative
                         let tt = place.get_type();
-                        let dtemp = fienv.get_data_temp(tt.clone(), env)?;
+                        let dtemp = fienv.get_data_temp(tt.clone())?;
                         let d_place = Place::DTemp(dtemp, tt);
                         let plan = ReturnPlan::Move(d_place.clone());
                         Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
@@ -1318,14 +1411,17 @@ impl Function {
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
                         ReturnPlan::Binop(pb, place).into_inter_instr(d_place, instrs, fienv, env)?;
                     },
-                    ReturnPlan::Move(place) => {
+                    (ReturnPlan::Move(place), _, _) | (ReturnPlan::Return, false, place) => {
                         let plan = ReturnPlan::Move(place.clone());
                         Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
                         let plan = ReturnPlan::Binop(b, place);
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
                     },
-                    ReturnPlan::Push(tt) => {
-                        let dtemp = fienv.get_data_temp(tt.clone(), env)?;
+                    (ReturnPlan::Return, true, _) => {
+                        return Err(format!("Cannot return array or struct type `{}` from binary expression", fienv.return_type));
+                    }
+                    (ReturnPlan::Push(tt), _, _) => {
+                        let dtemp = fienv.get_data_temp(tt.clone())?;
                         let d_place = Place::DTemp(dtemp, tt.clone());
                         let plan = ReturnPlan::Move(d_place.clone());
                         Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
@@ -1335,9 +1431,9 @@ impl Function {
                         fienv.free_data_temp(dtemp);
                         instrs.push(instr);
                     },
-                    ReturnPlan::None => {
-                        Self::compile_non_bin_expr(*nbe, plan.clone(), instrs, label_gen, fienv, env)?;
-                        Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
+                    (ReturnPlan::None, _, _) => {
+                        Self::compile_non_bin_expr(*nbe, ReturnPlan::None, instrs, label_gen, fienv, env)?;
+                        Self::compile_bin_expr(*be, ReturnPlan::None, instrs, label_gen, fienv, env)?;
                     },
                 }
 
@@ -1376,9 +1472,6 @@ impl Function {
             None => {
                 // Empty block expression
                 match &plan {
-                    ReturnPlan::None => {
-                        return Ok(());
-                    },
                     ReturnPlan::Binop(b, place) => {
                         return Err(format!("Empty block expression but expected to return to a binop expression, {} at {}", b, place));
                     }
@@ -1388,6 +1481,12 @@ impl Function {
                     ReturnPlan::Push(tt) => {
                         return Err(format!("Empty block expression but expected to push result of type {}", tt));
                     }
+                    ReturnPlan::Return => {
+                        return Err(format!("Empty block expression but expected to push result of type {}", fienv.return_type));
+                    }
+                    ReturnPlan::None => {
+                        return Ok(());
+                    },
                 }
             },
         };
@@ -1409,12 +1508,26 @@ impl Function {
         Ok(())
     }
     pub fn compile_var_decl_assign(vd: VarDecl, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: VarDeclAssgn");
+        let field = Field::new(vd, env);
+        fienv.add_var(&field)?;
+        let place = Place::Var(field);
+        let assign_plan = ReturnPlan::Move(place.clone());
+        Self::compile_expr(expr, assign_plan, instrs, label_gen, fienv, env)?;
+        plan.into_inter_instr(place, instrs, fienv, env)?;
         Ok(())
     }
-    pub fn compile_return_expr(expr: Option<Expr>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: ReturnExpr");
-        Ok(())
+    pub fn compile_return_expr(expr: Option<Expr>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        let plan = ReturnPlan::Return;
+        match expr {
+            Some(expr) => Self::compile_expr(expr, plan, instrs, label_gen, fienv, env),
+            None => {
+                if fienv.return_type != TypeType::Id("void".to_string()) {
+                    Err(format!("Must give an expression to return for function with return type {}", fienv.return_type))
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
     pub fn compile_cleanup_call(plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         warn!("Not implemented: CleanupCall");
@@ -1432,10 +1545,7 @@ impl Function {
     pub fn compile_lit_expr(lit: Literal, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match lit {
             Literal::Num(num) => {
-                let instr = plan.imm_into_inter_instr(Imm::LWord(num), env)?;
-                if let Some(instr) = instr {
-                    instrs.push(instr);
-                }
+                plan.imm_into_inter_instr(Imm::LWord(num), instrs, fienv, env)?;
             }
             Literal::Str(string) => {
                 let str_ind = fienv.add_lit_string(string.clone(), label_gen);
@@ -1451,6 +1561,7 @@ impl Function {
                     ReturnPlan::Binop(b, _) =>  {
                         return Err(format!("Cannot do binary operation {} on string literal \"{}\"", b, string));
                     }
+                    ReturnPlan::Return => fienv.rets(str_ind, instrs)?,
                     ReturnPlan::None => {}
                 }
             }
@@ -1458,8 +1569,7 @@ impl Function {
         Ok(())
     }
     pub fn compile_paren_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: ParenExpr");
-        Ok(())
+        Self::compile_expr(expr, plan, instrs, label_gen, fienv, env)
     }
     pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         // nbe needs to be an IdExpr
@@ -1487,6 +1597,11 @@ impl Function {
                             instrs.push(instr);
                             return Ok(());
                         },
+                        ReturnPlan::Return => {
+                            fienv.retva(&field.name, instrs)?;
+                            warn!("Returning reference to local variable `{}` from function", field.name);
+                            return Ok(());
+                        }
                         ReturnPlan::None => {
                             // No return plan
                             return Ok(());
@@ -1514,11 +1629,11 @@ impl Function {
                                     if let Some(d) = d { fienv.free_data_temp(d); }
                                     return Ok(());
                                 }
-                                Place::DTemp(to_d, to_tt) => {
+                                Place::DTemp(_, to_tt) => {
                                     // Move from Ref to ATemp to DTemp
                                     // Because we are moving an effective address, we have to move
                                     // to an ATemp before we move to a DTemp
-                                    if let TypeType::Pointer(to_val_tt) = &to_tt {
+                                    if let TypeType::Pointer(to_val_tt) = to_tt {
                                         if tt == **to_val_tt {
                                             let instr = InterInstr::Lea(a, d, off, a);
                                             instrs.push(instr);
@@ -1604,6 +1719,17 @@ impl Function {
                                 ));
                             }
                         }
+                        ReturnPlan::Return => {
+                            // Move from Ref to ATemp, then return
+                            // Because we are moving an effective address, we have to move
+                            // to an ATemp before we move to a DTemp
+                            let instr = InterInstr::Lea(a, d, off, a);
+                            instrs.push(instr);
+                            let a_place = Place::ATemp(a);
+                            fienv.ret(a_place, instrs, env)?;
+                            if let Some(d) = d { fienv.free_data_temp(d); }
+                            return Ok(())
+                        }
                         ReturnPlan::None => {
                             fienv.free_addr_temp(a);
                             if let Some(d) = d { fienv.free_data_temp(d); }
@@ -1617,13 +1743,13 @@ impl Function {
         }
     }
     pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        let tt = plan.get_type();
+        let tt = plan.get_type(fienv);
         if let BudUnop::Ref = un {
             return Self::get_reference(nbe, plan, instrs, label_gen, fienv, env);
         }
         if let Some(tt) = &tt {
             if !tt.is_magic(env) {
-                return Err(format!("Cannot return non-magic type {} from unary operator", tt));
+                return Err(format!("Cannot return non-magic type {} from unary operator {}", tt, un));
             }
         }
         match (plan.clone(), un) {
@@ -1652,7 +1778,7 @@ impl Function {
             (_, un) => {
                 // Store the result of `nbe` into a dtemp, do the unop, and then move the dtemp as the plan dictates
                 let tt = tt.unwrap();   // if plan is not None, then tt is not None
-                let dtemp = fienv.get_data_temp(tt.clone(), env)?;
+                let dtemp = fienv.get_data_temp(tt.clone())?;
                 let d_place = Place::DTemp(dtemp, tt.clone());
                 let instr = match un {
                     BudUnop::Neg => InterInstr::Neg(d_place.clone()),
@@ -1752,7 +1878,7 @@ impl Function {
                                 }
                                 None => {
                                     let tt = TypeType::Id("i32".to_owned());
-                                    let off_temp = fienv.get_data_temp(tt.clone(), env)?;   // offset as an index (not multiplied by sizeof(T))
+                                    let off_temp = fienv.get_data_temp(tt.clone())?;   // offset as an index (not multiplied by sizeof(T))
                                     let off_place = Place::DTemp(off_temp, tt.clone());
                                     let plan = ReturnPlan::Move(off_place.clone());
                                     Self::compile_expr(*offset, plan, instrs, label_gen, fienv, env)?;
@@ -1776,9 +1902,9 @@ impl Function {
             },
             IdExpr::Id(id) => {
                 // We need to store the result of expr into the variable, id
-                let place = match fienv.vars.get(&id) {
-                    Some((field, _)) => {
-                        Place::Var(field.clone())
+                let place = match fienv.get_var(&id) {
+                    Some(field) => {
+                        Place::Var(field)
                     },
                     None => {
                         return Err(format!("Undeclared variable {}", id));
@@ -1920,6 +2046,16 @@ impl Imm {
             DataSize::Byte => Imm::Byte(val as i8),
             DataSize::Word => Imm::Word(val as i16),
             DataSize::LWord => Imm::LWord(val),
+        }
+    }
+    pub fn as_type(self, tt: TypeType, env: &Environment) -> Result<Imm, String> {
+        if tt.is_magic(env) {
+            match tt.get_data_size(env) {
+                Some(size) => Ok(self.change_size(size)),
+                None => panic!("Type {} was magic but did not have a data size", tt),
+            }
+        } else {
+            Err(format!("Cannot convert immediate value {} into non-magic type {}", self, tt))
         }
     }
 }

@@ -7,6 +7,7 @@ from colorama import Fore, Back, Style
 import chardet
 import re
 import os
+import ast
 
 GREY = '\x1b[90m'
 
@@ -46,6 +47,8 @@ stack = None
 syntax_tree = None
 types_trace = None
 types = None
+funcs = None
+func_inter_instrs = None
 
 def read_usage(lines, index):
     if index >= len(lines):
@@ -312,6 +315,42 @@ def read_types(lines, index):
         index += 1
         return index
     
+def read_inter_funcs(lines, index):
+    if index >= len(lines) or not lines[index].startswith("Funcs: "):
+        print(red("Did not find inter funcs"))
+        return index
+    else:
+        print(green("Found inter funcs"))
+        global funcs
+        funcs = ast.literal_eval(lines[index][len("Funcs: "):])
+        global func_inter_instrs
+        func_inter_instrs = {}
+        index += 1
+        if index >= len(lines):
+            return index
+        while lines[index] != "End inter funcs":
+            name = None
+            if lines[index].startswith("Instructions for function "):
+                name = lines[index][len("Instructions for function "):]
+            else:
+                return index
+            index += 1
+            if index >= len(lines):
+                return index
+            instrs = []
+            while not lines[index].startswith("Instructions for function ") and lines[index] != "End inter funcs":
+                instrs.append(lines[index])
+                index += 1
+                if index >= len(lines):
+                    func_inter_instrs[name] = instrs
+                    return index
+            func_inter_instrs[name] = instrs
+        index += 1
+        return index
+                
+
+        
+
 
 def chardetect(dir):
     with open(dir, "rb") as file:
@@ -339,6 +378,8 @@ def read_output(dir):
     global stack
     global syntax_tree
     global types_trace
+    global funcs
+    global func_inter_instrs
     trace = []
     debug = []
     info = []
@@ -357,6 +398,8 @@ def read_output(dir):
     stack = None
     syntax_tree = None
     types_trace = None
+    funcs = None
+    func_inter_instrs = None
     try:
         with open(dir, "r", encoding=chardetect(dir)) as file:
             all_lines = file.readlines()
@@ -396,6 +439,7 @@ def read_output(dir):
     index = read_syntax_tree(to_read, index)
     index = read_types_trace(to_read, index)
     index = read_types(to_read, index)
+    index = read_inter_funcs(to_read, index)
 
 def read(*args):
     if len(args) > 0:
@@ -572,6 +616,28 @@ def print_types(*args):
         [print(x) for x in types]
     else:
         print("Types not found")
+    
+def print_funcs(*args):
+    if funcs is not None:
+        print(f"Funcs: {funcs}")
+    else:
+        print("Funcs not found")
+
+def print_func_instrs(*args):
+    if func_inter_instrs is not None:
+        if len(args) > 0:
+            funcs_to_print = args
+        else:
+            funcs_to_print = funcs
+        for func in funcs_to_print:
+            if func in func_inter_instrs:
+                print(f"Instructions for function {func}")
+                [print(x) for x in func_inter_instrs[func]]
+            else:
+                print(f"Func {func} not found")
+
+    else:
+        print("Func instrs not found")
 
 def pad_back(string, length):
     while len(string) < length:
@@ -607,6 +673,9 @@ def create_log_options():
         "print_action_table": True,
         "print_actions": True,
         "print_syntax_tree": True,
+        "print_types_trace": True,
+        "print_types": True,
+        "print_inter_funcs": True,
     }
 
 log_levels = {
@@ -619,7 +688,7 @@ log_levels = {
 }
 
 def run(*args):
-    log_level = "trace"    
+    log_level = "-trace"    
     options = create_log_options()
     command = "cargo run -- src/test.bud"
     for arg in args:
@@ -632,7 +701,7 @@ def run(*args):
             options[arg] = True
     for option in options:
         if options[option]:
-            command += " " + option
+            command += " -" + option
         else:
             command += " !" + option
     command += " " + log_level
@@ -660,8 +729,10 @@ commands = {
     "actions":          (print_actions,                             "Print the actions taken in parsing"),
     "stack":            (print_stack,                               "Print the final stack of the parser"),
     "stackstates":      (print_stack_states,                        "Pretty print all the states on the stack"),
-    "typetrace":        (print_types_trace,                          "Print the trace of the type-finding algorithm"),
+    "typetrace":        (print_types_trace,                         "Print the trace of the type-finding algorithm"),
     "type":             (print_types,                               "Print the list of types found in the program"),
+    "funcs":            (print_funcs,                               "Prints the list of functions found"),
+    "func":             (print_func_instrs,                         "Prints the intermediate instructions for the given function(s)"),
     "regex":            (regex,                                     "Find lines that match the given regular expression"),
     "tree":             (print_syntax_tree,                         "Print the produced syntax tree - Can be large"),
     "exit":             (lambda *args: exit(),                      "Quit the analyzer"),
