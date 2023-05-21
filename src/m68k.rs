@@ -542,7 +542,7 @@ pub struct CompiledEnvironment {
     pub funcs: Vec<CompiledFunction>,
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct Field {
     pub tt: TypeType,
     pub name: String,
@@ -588,7 +588,7 @@ impl Type {
 }
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<{}, {}{}>", self.typtyp.to_string(), match self.size {
+        write!(f, "<{}, {}{}>", self.typtyp.name(), match self.size {
             Choice::Some(size) => size.to_string(),
             Choice::Other((size, _)) => size.to_string(),
         }, if self.magic { ", magic" } else { "" })
@@ -650,11 +650,12 @@ impl TypeType {
                     TypeType::Id(id)
                 }
             },
-            TypeExpr::TypSqr(typ, mut sqr) => {
-                match sqr.pop() {
-                    Some(size) => TypeType::Array(Box::new(TypeType::new(*typ, environment)), size),
-                    None => TypeType::new(*typ, environment)
+            TypeExpr::TypSqr(typ, sqr) => {
+                let mut tt = TypeType::new(*typ, environment);
+                for len in sqr {
+                    tt = TypeType::Array(Box::new(tt), len);
                 }
+                tt
             }
             TypeExpr::Pointer(typ) => TypeType::Pointer(
                 Box::new(TypeType::new(*typ, environment))
@@ -676,11 +677,11 @@ impl TypeType {
             _ => None,
         }
     }
-    fn to_string(&self) -> String {
+    fn name(&self) -> String {
         match self {
             TypeType::Id(id) => id.to_owned(),
-            TypeType::Pointer(typtyp) => "@(".to_owned() + &typtyp.to_string() + ")",
-            TypeType::Array(typtyp, len) => typtyp.to_string() + "[" + &len.to_string() + "]",
+            TypeType::Pointer(typtyp) => "@(".to_owned() + &typtyp.name() + ")",
+            TypeType::Array(typtyp, len) => typtyp.name() + "[" + &len.to_string() + "]",
             TypeType::Struct(name, _) => name.to_owned(),
         }
     }
@@ -738,7 +739,7 @@ impl TypeType {
 }
 impl std::fmt::Display for TypeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<{}>", self.to_string())
+        write!(f, "<{}>", self.name())
     }
 }
 impl std::fmt::Debug for TypeType {
@@ -1030,8 +1031,13 @@ pub enum ReturnPlan {
 impl ReturnPlan {
     /// Also frees this place
     pub fn into_inter_instr(self, from: Place, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        let from_tt = from.get_type();
+        let from_tt_size = from_tt.get_size(env);
+        let to_tt;
+        let to_tt_size;
         match self {
             ReturnPlan::Binop(b, to) => {
+                to_tt = to.get_type();
                 if !to.is_magic(env) {
                     return Err(format!("Cannot do binary operator {} on non-magic type {}", b, to.get_type()));
                 }
@@ -1043,19 +1049,32 @@ impl ReturnPlan {
                 from.free(fienv);
             }
             ReturnPlan::Move(to) => {
+                to_tt = to.get_type();
                 let instr = InterInstr::Move(from.clone(), to);
                 instrs.push(instr);
                 from.free(fienv);
             },
             ReturnPlan::Push(tt) => {
+                to_tt = tt.clone();
                 let instr = InterInstr::Push(from.clone(), tt);
                 instrs.push(instr);
                 from.free(fienv);
             }
-            ReturnPlan::Return => fienv.ret(from.clone(), instrs, env)?,
+            ReturnPlan::Return => {
+                return fienv.ret(from.clone(), instrs, env);
+            },
             ReturnPlan::None => {
                 from.free(fienv);
+                return Ok(());
             },
+        }
+        to_tt_size = to_tt.get_size(env);
+        if from_tt != to_tt {
+            if from_tt.get_size(env) == to_tt.get_size(env) {
+                warn!("Implicit cast between equally sized types: {} -> {}", from_tt, to_tt);
+            } else {
+                return Err(format!("Implicit cast between unequally sized types: {} -> {} ({} -> {})", from_tt, to_tt, from_tt_size, to_tt_size));
+            }
         }
         Ok(())
     }
