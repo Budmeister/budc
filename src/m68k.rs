@@ -535,6 +535,12 @@ impl Environment {
         }
         (layout, position)
     }
+    pub fn get_str_tt() -> TypeType {
+        TypeType::Pointer(Box::new(TypeType::Id("i8".to_owned())))
+    }
+    pub fn get_bool_tt() -> TypeType {
+        TypeType::Id("i8".to_owned())
+    }
 }
 
 pub struct CompiledEnvironment {
@@ -1019,12 +1025,28 @@ impl std::fmt::Debug for Place {
     }
 }
 
-// For telling an expression where to put its output
+/// `ReturnPlan`s tell an expression where to put its output. 
+/// Except for `Return` and `None` variants, all `ReturnPlan`s should
+/// set the condition flags as a part of the process.
 #[derive(Clone, Debug)]
 pub enum ReturnPlan {
-    Binop(BudBinop, Place), // Place must have a magic type
+    /// Do the binop with the result of this expr and the given place
+    /// The place must have a magic type, since only magic types
+    /// can do binops.
+    Binop(BudBinop, Place),
+    /// Move the result of this expr into the given place. Since the
+    /// return place is going to be overwritten anyway, it can be used
+    /// in the evaluation of this expr
     Move(Place),
+    /// Push the result of this expr onto the stack.
     Push(TypeType),
+    /// Return the result of this expr from a function. 
+    /// `FunctionInterEnvironment.ret`, `.reti`, `.rets`, and `.retva` 
+    /// can be used to return a value. When `ReturnPlan::Return`
+    /// is given, the callee is expected to push `InterInstr::Rts`
+    /// onto `instrs` after moving the result into the retval.
+    /// `ReturnPlan::Return` can be given even in a void function because
+    /// of return statements.
     Return,
     None,
 }
@@ -1144,6 +1166,7 @@ pub enum InterInstr {
     Call(String),
     Lbl(usize),
     Goto(usize),
+    Rts,
     Lsr(DTemp, DataSize, DTemp, DataSize),
     Lsri(Imm, DTemp, DataSize),
     Bcc(usize),
@@ -1168,7 +1191,8 @@ pub struct FunctionInterEnvironment {
     pub vars: Vec<Field>,
     // (label number, string)
     pub lit_strings: Vec<(usize, String)>,
-    pub cleanup_label: Option<usize>,
+    cleanup_label: Option<usize>,
+    cleanup_expr_created: bool,
     pub return_type: TypeType,
     // dtemps and atemps can only hold variables up to 4 bytes
     // Variables greater than 4 bytes must be stored in vars.
@@ -1188,6 +1212,7 @@ impl FunctionInterEnvironment {
                 .collect(),
             lit_strings: Vec::new(),
             cleanup_label: None,
+            cleanup_expr_created: false,
             return_type,
             dtemps: Vec::new(),
             atemps: Vec::new(),
@@ -1307,6 +1332,8 @@ impl FunctionInterEnvironment {
         }
         let instr = InterInstr::Move(place, to);
         instrs.push(instr);
+        let instr = InterInstr::Rts;
+        instrs.push(instr);
         Ok(())
     }
     pub fn reti(&mut self, imm: Imm, instrs: &mut Vec<InterInstr>, env: &Environment) -> Result<(), String> {
@@ -1314,15 +1341,19 @@ impl FunctionInterEnvironment {
         let to = Place::DTemp(0, self.return_type.clone());
         let instr = InterInstr::Movi(imm, to);
         instrs.push(instr);
+        let instr = InterInstr::Rts;
+        instrs.push(instr);
         Ok(())
     }
     pub fn rets(&mut self, string: usize, instrs: &mut Vec<InterInstr>) -> Result<(), String> {
-        let tt = TypeType::Pointer(Box::new(TypeType::Id("i8".to_owned())));
+        let tt = Environment::get_str_tt();
         if tt != self.return_type {
             return Err(format!("Function has return type {} but tried to return literal string of type {}", self.return_type, tt));
         }
         let to = Place::DTemp(0, tt);
         let instr = InterInstr::Movs(string, to);
+        instrs.push(instr);
+        let instr = InterInstr::Rts;
         instrs.push(instr);
         Ok(())
     }
@@ -1339,6 +1370,8 @@ impl FunctionInterEnvironment {
         }
         let to = Place::DTemp(0, tt);
         let instr = InterInstr::MoVA(var.name, to);
+        instrs.push(instr);
+        let instr = InterInstr::Rts;
         instrs.push(instr);
         Ok(())
     }
@@ -1391,6 +1424,12 @@ impl Function {
             &mut fienv,
             env,
         )?;
+        if !fienv.cleanup_expr_created {
+            if let Some(cleanup_label) = fienv.cleanup_label {
+                let instr = InterInstr::Lbl(cleanup_label);
+                instrs.push(instr);
+            }
+        }
         // Things we need to know (from searching the function expression):
         //  * String literals
         //  * All local variables (can be Fields)
@@ -1501,7 +1540,7 @@ impl Function {
                         return Err(format!("Empty block expression but expected to push result of type {}", tt));
                     }
                     ReturnPlan::Return => {
-                        return Err(format!("Empty block expression but expected to push result of type {}", fienv.return_type));
+                        return Err(format!("Empty block expression but expected to return result of type {}", fienv.return_type));
                     }
                     ReturnPlan::None => {
                         return Ok(());
@@ -1548,13 +1587,29 @@ impl Function {
             }
         }
     }
-    pub fn compile_cleanup_call(plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: CleanupCall");
+    pub fn compile_cleanup_call(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
+        let cleanup_label = fienv.get_cleanup_label(label_gen);
+        let instr = InterInstr::Goto(cleanup_label);
+        instrs.push(instr);
         Ok(())
     }
     pub fn compile_cleanup_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: CleanupExpr");
-        Ok(())
+        if fienv.cleanup_expr_created {
+            return Err(format!("Found more than one cleanup expression. There should only be one."));
+        }
+        match plan {
+            ReturnPlan::Return => {
+                let cleanup_label = fienv.get_cleanup_label(label_gen);
+                let instr = InterInstr::Lbl(cleanup_label);
+                instrs.push(instr);
+                fienv.cleanup_expr_created = true;
+                Self::compile_expr(expr, ReturnPlan::Return, instrs, label_gen, fienv, env)?;
+                Ok(())
+            }
+            _ => {
+                Err(format!("Can only compile cleanup expression where a return value is expected. The cleanup expression should be at the end of the function."))
+            }
+        }
     }
     pub fn compile_id_expr(id: IdExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         let place = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
@@ -1574,6 +1629,10 @@ impl Function {
                         instrs.push(instr);
                     }
                     ReturnPlan::Push(tt) => {
+                        let str_tt = Environment::get_str_tt();
+                        if tt != str_tt {
+                            return Err(format!("Expected to push value of type {} to stack but found string type {}", tt, str_tt));
+                        }
                         let instr = InterInstr::Puss(str_ind);
                         instrs.push(instr);
                     }
@@ -1812,7 +1871,37 @@ impl Function {
         Ok(())
     }
     pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: IfExpr");
+        match plan {
+            ReturnPlan::None => {}
+            ReturnPlan::Return => {
+                if !fienv.return_type.is_void() {
+                    return Err(format!("Cannot return a value from if statement. Tried to return type {}", fienv.return_type));
+                }
+            }
+            ReturnPlan::Binop(b, _) => { return Err(format!("Cannot return a value from if statement. Tried to return to binop {}", b)); }
+            ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from if statement.")); }
+            ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from if statement. Tried to push type {}", tt)); }
+        }
+        let tt = Environment::get_bool_tt();
+        // Maybe we could use D0--the return register--instead of getting a new register
+        // because we don't care about the actual value, only the condition codes
+        // Maybe CC should be a ReturnPlan??
+        let dtemp = fienv.get_data_temp(tt.clone())?;
+        let d_place = Place::DTemp(dtemp, tt.clone());
+        let cond_plan = ReturnPlan::Move(d_place.clone());
+        Self::compile_expr(cond, cond_plan, instrs, label_gen, fienv, env)?;
+        // Condition codes should be set accordingly. I hope they are.
+        let f_label = label_gen.next().unwrap();
+        let instr = InterInstr::Beq(f_label);
+        instrs.push(instr);
+        d_place.free(fienv);
+        Self::compile_expr(expr, plan.clone(), instrs, label_gen, fienv, env)?;
+        let instr = InterInstr::Lbl(f_label);
+        instrs.push(instr);
+        if let ReturnPlan::Return = plan {
+            let instr = InterInstr::Rts;
+            instrs.push(instr);
+        }
         Ok(())
     }
     pub fn compile_if_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
