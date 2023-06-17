@@ -233,12 +233,12 @@ grammar::grammar!(
         UnaryExpr   => Unop, NonBinExpr;
         BinaryExpr  => NonBinExpr, Binop, BinaryExpr;
         BinaryExpr  => NonBinExpr;
-        IfExpr      => If, Expr, LeftSquiggly, Expr, RightSquiggly;
-        IfElse      => If, Expr, LeftSquiggly, Expr, RightSquiggly, Else, LeftSquiggly, Expr, RightSquiggly;
-        UnlExpr     => Unless, Expr, LeftSquiggly, Expr, RightSquiggly;
-        UnlElse     => Unless, Expr, LeftSquiggly, Expr, RightSquiggly, Else, LeftSquiggly, Expr, RightSquiggly;
-        WhileExpr   => While, Expr, LeftSquiggly, Expr, RightSquiggly;
-        DoWhile     => Do, LeftSquiggly, Expr, RightSquiggly, While, Expr, Semicolon;
+        IfExpr      => If, Expr, BlockExpr;
+        IfElse      => If, Expr, BlockExpr, Else, BlockExpr;
+        UnlExpr     => Unless, Expr, BlockExpr;
+        UnlElse     => Unless, Expr, BlockExpr, Else, BlockExpr;
+        WhileExpr   => While, Expr, BlockExpr;
+        DoWhile     => Do, BlockExpr, While, Expr, Semicolon;
 
         // Literals
         LitExpr     => NumGen;
@@ -499,6 +499,7 @@ impl std::fmt::Display for BudNonTerminal {
     }
 }
 
+use crate::m68k::{Environment, FunctionInterEnvironment};
 use crate::parse::Node;
 type BudNode = Node<BudTerminal, BudNonTerminal>;
 type BudNodes = Vec<BudNode>;
@@ -902,10 +903,14 @@ impl NonBinExpr {
     }
     fn if_expr(children: &Vec<Node<BudTerminal, BudNonTerminal>>) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::Tm(T::If), Node::NonTm(N::Expr, cond), Node::Tm(T::LeftSquiggly), Node::NonTm(N::Expr, expr), Node::Tm(T::RightSquiggly)] => {
+            [Node::Tm(T::If), Node::NonTm(N::Expr, cond), Node::NonTm(N::BlockExpr, exprs)] => {
+                let expr = Expr {
+                    bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(exprs)?)))),
+                    with_semicolon: false,
+                };
                 Ok(NonBinExpr::IfExpr(
                     Box::new(Expr::new(cond)?),
-                    Box::new(Expr::new(expr)?),
+                    Box::new(expr),
                 ))
             }
             _ => {
@@ -915,11 +920,19 @@ impl NonBinExpr {
     }
     fn if_else(children: &Vec<Node<BudTerminal, BudNonTerminal>>) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::Tm(T::If), Node::NonTm(N::Expr, cond), Node::Tm(T::LeftSquiggly), Node::NonTm(N::Expr, expr_t), Node::Tm(T::RightSquiggly), Node::Tm(T::Else), Node::Tm(T::LeftSquiggly), Node::NonTm(N::Expr, expr_f), Node::Tm(T::RightSquiggly)] => {
+            [Node::Tm(T::If), Node::NonTm(N::Expr, cond), Node::NonTm(N::BlockExpr, exprs_t), Node::Tm(T::Else), Node::NonTm(N::BlockExpr, exprs_f)] => {
+                let expr_t = Expr {
+                    bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(exprs_t)?)))),
+                    with_semicolon: false,
+                };
+                let expr_f = Expr {
+                    bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(exprs_f)?)))),
+                    with_semicolon: false,
+                };
                 Ok(NonBinExpr::IfElse(
                     Box::new(Expr::new(cond)?),
-                    Box::new(Expr::new(expr_t)?),
-                    Box::new(Expr::new(expr_f)?),
+                    Box::new(expr_t),
+                    Box::new(expr_f),
                 ))
             }
             _ => {
@@ -931,10 +944,14 @@ impl NonBinExpr {
         children: &Vec<Node<BudTerminal, BudNonTerminal>>,
     ) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::Tm(T::Unless), Node::NonTm(N::Expr, cond), Node::Tm(T::LeftSquiggly), Node::NonTm(N::Expr, expr), Node::Tm(T::RightSquiggly)] => {
+            [Node::Tm(T::Unless), Node::NonTm(N::Expr, cond), Node::NonTm(N::BlockExpr, exprs)] => {
+                let expr = Expr {
+                    bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(exprs)?)))),
+                    with_semicolon: false,
+                };
                 Ok(NonBinExpr::UnlExpr(
                     Box::new(Expr::new(cond)?),
-                    Box::new(Expr::new(expr)?),
+                    Box::new(expr),
                 ))
             }
             _ => {
@@ -946,11 +963,19 @@ impl NonBinExpr {
         children: &Vec<Node<BudTerminal, BudNonTerminal>>,
     ) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::Tm(T::Unless), Node::NonTm(N::Expr, cond), Node::Tm(T::LeftSquiggly), Node::NonTm(N::Expr, expr_t), Node::Tm(T::RightSquiggly), Node::Tm(T::Else), Node::Tm(T::LeftSquiggly), Node::NonTm(N::Expr, expr_f), Node::Tm(T::RightSquiggly)] => {
+            [Node::Tm(T::Unless), Node::NonTm(N::Expr, cond), Node::NonTm(N::BlockExpr, exprs_f), Node::Tm(T::Else), Node::NonTm(N::BlockExpr, exprs_t)] => {
+                let expr_f = Expr {
+                    bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(exprs_f)?)))),
+                    with_semicolon: false,
+                };
+                let expr_t = Expr {
+                    bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(exprs_t)?)))),
+                    with_semicolon: false,
+                };
                 Ok(NonBinExpr::UnlElse(
                     Box::new(Expr::new(cond)?),
-                    Box::new(Expr::new(expr_t)?),
-                    Box::new(Expr::new(expr_f)?),
+                    Box::new(expr_f),
+                    Box::new(expr_t),
                 ))
             }
             _ => {
@@ -960,10 +985,14 @@ impl NonBinExpr {
     }
     fn while_expr(children: &Vec<Node<BudTerminal, BudNonTerminal>>) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::Tm(T::While), Node::NonTm(N::Expr, cond), Node::Tm(T::LeftSquiggly), Node::NonTm(N::Expr, expr), Node::Tm(T::RightSquiggly)] => {
+            [Node::Tm(T::While), Node::NonTm(N::Expr, cond), Node::NonTm(N::BlockExpr, exprs)] => {
+                let expr = Expr {
+                    bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(exprs)?)))),
+                    with_semicolon: false,
+                };
                 Ok(NonBinExpr::WhileExpr(
                     Box::new(Expr::new(cond)?),
-                    Box::new(Expr::new(expr)?),
+                    Box::new(expr),
                 ))
             }
             _ => {
@@ -973,9 +1002,13 @@ impl NonBinExpr {
     }
     fn do_while(children: &Vec<Node<BudTerminal, BudNonTerminal>>) -> Result<NonBinExpr, String> {
         match &children[..] {
-            [Node::Tm(T::Do), Node::Tm(T::LeftSquiggly), Node::NonTm(N::Expr, expr), Node::Tm(T::RightSquiggly), Node::NonTm(N::Expr, cond), Node::Tm(T::Semicolon)] => {
+            [Node::Tm(T::Do), Node::NonTm(N::BlockExpr, exprs), Node::Tm(T::While), Node::NonTm(N::Expr, cond), Node::Tm(T::Semicolon)] => {
+                let expr = Expr {
+                    bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(exprs)?)))),
+                    with_semicolon: false,
+                };
                 Ok(NonBinExpr::DoWhile(
-                    Box::new(Expr::new(expr)?),
+                    Box::new(expr),
                     Box::new(Expr::new(cond)?),
                 ))
             }

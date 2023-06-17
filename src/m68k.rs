@@ -8,19 +8,19 @@ use crate::{bud, parse::Node};
 use log::*;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
-pub enum Choice<T, U> {
+pub enum Either<T, U> {
     Some(T),
     Other(U),
 }
-impl<T: std::fmt::Display, U: std::fmt::Display> std::fmt::Display for Choice<T, U> {
+impl<T: std::fmt::Display, U: std::fmt::Display> std::fmt::Display for Either<T, U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Choice::Some(t) => write!(f, "{}", t),
-            Choice::Other(u) => write!(f, "{}", u),
+            Either::Some(t) => write!(f, "{}", t),
+            Either::Other(u) => write!(f, "{}", u),
         }
     }
 }
-impl<T: std::fmt::Display, U: std::fmt::Display> std::fmt::Debug for Choice<T, U> {
+impl<T: std::fmt::Display, U: std::fmt::Display> std::fmt::Debug for Either<T, U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self)
     }
@@ -37,7 +37,7 @@ impl BudExpander {
             (
                 TypeType::Id("i8".to_owned()),
                 Type {
-                    size: Choice::Some(1),
+                    size: Either::Some(1),
                     typtyp: TypeType::Id("i8".to_owned()),
                     magic: true,
                 },
@@ -45,7 +45,7 @@ impl BudExpander {
             (
                 TypeType::Id("i16".to_owned()),
                 Type {
-                    size: Choice::Some(2),
+                    size: Either::Some(2),
                     typtyp: TypeType::Id("i16".to_owned()),
                     magic: true,
                 },
@@ -53,7 +53,7 @@ impl BudExpander {
             (
                 TypeType::Id("i32".to_owned()),
                 Type {
-                    size: Choice::Some(4),
+                    size: Either::Some(4),
                     typtyp: TypeType::Id("i32".to_owned()),
                     magic: true,
                 },
@@ -255,7 +255,7 @@ impl BudExpander {
     }
 }
 
-type TypeSize = Choice<u32, (u32, HashMap<String, (u32, TypeType)>)>;   // Choice<size, (size_of_struct, HashMap<field_name, (field_offset, field_type)>)>
+type TypeSize = Either<u32, (u32, HashMap<String, (u32, TypeType)>)>;   // Choice<size, (size_of_struct, HashMap<field_name, (field_offset, field_type)>)>
 
 // #[derive(Eq, PartialEq, Debug)]
 enum TypeSizeState {
@@ -270,8 +270,8 @@ impl std::fmt::Debug for TypeSizeState {
             TypeSizeState::BeingCalculated => "BeingCalculated".to_owned(),
             TypeSizeState::Calculated(size) => {
                 match size {
-                    Choice::Some(size) => size.to_string(),
-                    Choice::Other((size, _)) => size.to_string(),
+                    Either::Some(size) => size.to_string(),
+                    Either::Other((size, _)) => size.to_string(),
                 }
             }
         })
@@ -325,16 +325,16 @@ impl TypeSizeGenerator {
                         let subtyp_clone = (&**subtyp).clone();
                         Self::get_size(size_generators, subtyp_clone, top)?;
                         size_generators.get_mut(&index).unwrap().state =
-                            TypeSizeState::Calculated(Choice::Some(BudExpander::REG_SIZE));
-                        Ok(Choice::Some(BudExpander::REG_SIZE))
+                            TypeSizeState::Calculated(Either::Some(BudExpander::REG_SIZE));
+                        Ok(Either::Some(BudExpander::REG_SIZE))
                     }
                     TypeType::Array(subtyp, len) => {
                         let subtyp_clone = (&**subtyp).clone();
                         let len = *len;
-                        let (Choice::Some(subsize) | Choice::Other((subsize, _))) = Self::get_size(size_generators, subtyp_clone, top)?;
+                        let (Either::Some(subsize) | Either::Other((subsize, _))) = Self::get_size(size_generators, subtyp_clone, top)?;
                         size_generators.get_mut(&index).unwrap().state =
-                            TypeSizeState::Calculated(Choice::Some(subsize * len as u32));
-                        Ok(Choice::Some(subsize * len as u32))
+                            TypeSizeState::Calculated(Either::Some(subsize * len as u32));
+                        Ok(Either::Some(subsize * len as u32))
                     }
                     TypeType::Id(name) => {
                         // Must be a built-in type
@@ -355,7 +355,7 @@ impl TypeSizeGenerator {
                                 size_generators.get_mut(&index).unwrap().state =
                                     TypeSizeState::Calculated(size.clone());                                // And this line is really
                                 // generator.state = TypeSizeState::Calculated(size);                       // this line
-                                let (Choice::Some(size) | Choice::Other((size, _))) = size;
+                                let (Either::Some(size) | Either::Other((size, _))) = size;
                                 Ok(size)
                             })
                             .collect::<Result<Vec<u32>, String>>()?;
@@ -371,7 +371,7 @@ impl TypeSizeGenerator {
                                 )
                             ))
                             .collect();
-                        Ok(Choice::Other((size, fields)))
+                        Ok(Either::Other((size, fields)))
                     }
                     TypeType::Struct(name, None) => Err(format!(
                         "Struct {} not initialized with fields before calling get_size on type {}",
@@ -541,6 +541,103 @@ impl Environment {
     pub fn get_bool_tt() -> TypeType {
         TypeType::Id("i8".to_owned())
     }
+    pub fn get_void_tt() -> TypeType {
+        TypeType::Id("void".to_owned())
+    }
+}
+
+impl Expr {
+    fn type_preference(&self, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, String> {
+        self.bin_expr.type_preference(fienv, env)
+    }
+}
+
+impl BinExpr {
+    fn type_preference(&self, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, String> {
+        let (BinExpr::Binary(nbe, _, _) | BinExpr::NonBin(nbe)) = self;
+        nbe.type_preference(fienv, env)
+    }
+}
+
+impl NonBinExpr {
+    fn type_preference(&self, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, String> {
+        match self {
+            NonBinExpr::BlockExpr(exprs) => {
+                match exprs.last() {
+                    Some(expr) => expr.type_preference(fienv, env),
+                    None => Ok(Environment::get_void_tt()),
+                }
+            },
+            NonBinExpr::AssignExpr(id, _) => IdExpr::id_to_tt(IdExpr::clone(id), fienv, env),
+            NonBinExpr::VarDeclAssgn(vd, _) => {
+                let field = Field::new(VarDecl::clone(vd), env);
+                Ok(field.tt)
+            },
+            NonBinExpr::ReturnExpr(_) => Ok(Environment::get_void_tt()),
+            NonBinExpr::CleanupCall => Ok(Environment::get_void_tt()),
+            NonBinExpr::CleanupExpr(_) => Ok(Environment::get_void_tt()),
+            NonBinExpr::IdExpr(id) => IdExpr::id_to_tt(IdExpr::clone(id), fienv, env),
+            NonBinExpr::LitExpr(_) => Ok(TypeType::Id("i32".to_owned())),
+            NonBinExpr::ParenExpr(expr) => expr.type_preference(fienv, env),
+            NonBinExpr::UnaryExpr(_, expr) => expr.type_preference(fienv, env),
+            NonBinExpr::IfExpr(_, _) => Ok(Environment::get_void_tt()),
+            NonBinExpr::IfElse(_, expr, _) => expr.type_preference(fienv, env),         // If the expressions don't agree, then
+            NonBinExpr::UnlExpr(_, _) => Ok(Environment::get_void_tt()),                            // the error will be thrown when the 
+            NonBinExpr::UnlElse(_, expr, _) => expr.type_preference(fienv, env),        // `if` or `unless` is compiles
+            NonBinExpr::WhileExpr(_, _) => Ok(Environment::get_void_tt()),
+            NonBinExpr::DoWhile(_, expr) => expr.type_preference(fienv, env),
+            NonBinExpr::Break => Ok(Environment::get_void_tt()),
+            NonBinExpr::Continue => Ok(Environment::get_void_tt()),
+        }
+    }
+
+}
+impl IdExpr {
+    /// Gets the TypeType of this IdExpr
+    fn id_to_tt(id: IdExpr, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, String> {
+        match id {
+            IdExpr::SquareIndex(expr, _offset) => {
+                // TODO Handle struct member access here, too
+                let tt = expr.type_preference(fienv, env)?;
+                if let TypeType::Array(tt, _) = tt {
+                    Ok(*tt)
+                } else {
+                    Err(format!("Cannot index into non-array type. Struct member access has not been implemented yet."))
+                }
+            }
+            IdExpr::RoundIndex(expr, _) => {
+                warn!("Round indexing not yet implemented");
+                let tt = expr.type_preference(fienv, env)?;
+                if let TypeType::Array(tt, _) = tt {
+                    Ok(*tt)
+                } else {
+                    Err(format!("Cannot index into non-array type. Struct member access has not been implemented yet."))
+                }
+            }
+            IdExpr::Deref(id) => {
+                let tt = IdExpr::id_to_tt(*id, fienv, env)?;
+                match tt {
+                    TypeType::Pointer(tt) => Ok(*tt),
+                    TypeType::Id(name) => {
+                        let field = fienv.get_var(&name);
+                        match field {
+                            Some(Field { tt , name: _ }) => Ok(tt),
+                            _ => Err(format!("Unknown id {}", name))
+                        }
+                    }
+                    TypeType::Array(_, _) => Err(format!("Cannot dereference array")),
+                    TypeType::Struct(name, _) => Err(format!("Cannot dereference struct {}", name)),
+                }
+            }
+            IdExpr::Id(name) => {
+                if let Some(Field { tt, name: _ }) = fienv.get_var(&name) {
+                    Ok(tt)
+                } else {
+                    Err(format!("Unknown id {}", name))
+                }
+            }
+        }
+    }
 }
 
 pub struct CompiledEnvironment {
@@ -588,15 +685,15 @@ pub struct Type {
 impl Type {
     pub fn get_size(&self) -> u32 {
         match self.size {
-            Choice::Some(size) | Choice::Other((size, _)) => size
+            Either::Some(size) | Either::Other((size, _)) => size
         }
     }
 }
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "<{}, {}{}>", self.typtyp.name(), match self.size {
-            Choice::Some(size) => size.to_string(),
-            Choice::Other((size, _)) => size.to_string(),
+            Either::Some(size) => size.to_string(),
+            Either::Other((size, _)) => size.to_string(),
         }, if self.magic { ", magic" } else { "" })
     }
 }
@@ -670,7 +767,7 @@ impl TypeType {
     }
     pub fn get_size(&self, env: &Environment) -> u32 {
         match env.types.get(self).unwrap().size {
-            Choice::Some(size) | Choice::Other((size, _)) => size
+            Either::Some(size) | Either::Other((size, _)) => size
         }
     }
     // Returns None if the size is not a Byte, Word, or LWord
@@ -729,7 +826,7 @@ impl TypeType {
         }
     }
     fn is_void(&self) -> bool {
-        *self == TypeType::Id("void".to_owned())
+        *self == Environment::get_void_tt()
     }
 
     // Also adds self
@@ -799,7 +896,7 @@ impl Place {
                 f.tt.clone()
             }
             Place::ATemp(_) => {
-                TypeType::Pointer(Box::new(TypeType::Id("void".to_owned())))
+                TypeType::Pointer(Box::new(Environment::get_void_tt()))
             }
             Place::DTemp(_, tt) => {
                 tt.clone()
@@ -811,7 +908,7 @@ impl Place {
     }
     pub fn get_size(&self, env: &Environment) -> u32 {
         match env.types.get(&self.get_type()).unwrap().size {
-            Choice::Some(size) | Choice::Other((size, _)) => size
+            Either::Some(size) | Either::Other((size, _)) => size
         }
     }
     // Returns None if the size is not a Byte, Word, or LWord
@@ -891,7 +988,7 @@ impl Place {
                     Some(t) => t.size.clone(),
                     None => { return Err(format!("Struct type not found in environment: {}", name)); },
                 };
-                if let Choice::Other((_, layout)) = size {
+                if let Either::Other((_, layout)) = size {
                     off = match layout.get(f_name) {
                         Some((off, _)) => *off as i32,
                         None => { return Err(format!("Struct {} has no field {}", name, f_name)); },
@@ -1001,7 +1098,7 @@ impl Place {
         self.get_type().is_id()
     }
     pub fn is_void(&self) -> bool {
-        self.get_type() == TypeType::Id("void".to_owned())
+        self.get_type() == Environment::get_void_tt()
     }
 }
 impl std::fmt::Display for Place {
@@ -1026,8 +1123,8 @@ impl std::fmt::Debug for Place {
 }
 
 /// `ReturnPlan`s tell an expression where to put its output. 
-/// Except for `Return` and `None` variants, all `ReturnPlan`s should
-/// set the condition flags as a part of the process.
+/// `ReturnPlan`s are not required to set the condition codes accordingly
+/// except for the `Condition` variant.
 #[derive(Clone, Debug)]
 pub enum ReturnPlan {
     /// Do the binop with the result of this expr and the given place
@@ -1038,6 +1135,9 @@ pub enum ReturnPlan {
     /// return place is going to be overwritten anyway, it can be used
     /// in the evaluation of this expr
     Move(Place),
+    /// Set the condition codes for the result of this expr, but the result
+    /// doesn't need to be moved to any place in particular.
+    Condition,
     /// Push the result of this expr onto the stack.
     Push(TypeType),
     /// Return the result of this expr from a function. 
@@ -1051,7 +1151,7 @@ pub enum ReturnPlan {
     None,
 }
 impl ReturnPlan {
-    /// Also frees this place
+    /// Also frees this place. If self is `Return`, also adds `Rts` instruction
     pub fn into_inter_instr(self, from: Place, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         let from_tt = from.get_type();
         let from_tt_size = from_tt.get_size(env);
@@ -1076,6 +1176,12 @@ impl ReturnPlan {
                 instrs.push(instr);
                 from.free(fienv);
             },
+            ReturnPlan::Condition => {
+                let instr = InterInstr::Tst(from.clone());
+                instrs.push(instr);
+                from.free(fienv);
+                return Ok(());
+            }
             ReturnPlan::Push(tt) => {
                 to_tt = tt.clone();
                 let instr = InterInstr::Push(from.clone(), tt);
@@ -1114,6 +1220,10 @@ impl ReturnPlan {
                 let instr = InterInstr::Movi(from.change_size(size), to);
                 instrs.push(instr);
             }
+            ReturnPlan::Condition => {
+                let instr = InterInstr::Tsti(from);
+                instrs.push(instr);
+            }
             ReturnPlan::Push(tt) => {
                 let instr = InterInstr::Pusi(from.as_type(tt, env)?);
                 instrs.push(instr);
@@ -1132,11 +1242,12 @@ impl ReturnPlan {
             None => Err(format!("Magic type {} has invalid size, {}", to.get_type(), to.get_size(env))),
         }
     }
-    /// Returns type type you are expected to give to this plan. If the plan is None, then this function returns None.
+    /// Returns type type you are expected to give to this plan. If the plan is None or Condition, then this function returns None.
     pub fn get_type(&self, fienv: &mut FunctionInterEnvironment) -> Option<TypeType> {
         match self {
             ReturnPlan::Binop(_, place) => Some(place.get_type()),
             ReturnPlan::Move(place) => Some(place.get_type()),
+            ReturnPlan::Condition => None,
             ReturnPlan::Push(tt) => Some(tt.clone()),
             ReturnPlan::Return => Some(fienv.return_type.clone()),
             ReturnPlan::None => None,
@@ -1159,7 +1270,7 @@ pub enum InterInstr {
     Lea(ATemp, Option<DTemp>, i32, ATemp),      // Load effective address into an address register
     Push(Place, TypeType),
     PuVA(String),
-    Pusi(Imm),                                  // Do we really need the TypeType for an Imm?
+    Pusi(Imm),
     Puss(usize),                                // Push string literal (by the string literal's global label)
     Pea(ATemp, Option<DTemp>, i32),             // Push effective address onto stack
     MoveSP(i32),                                // for calling functions
@@ -1169,6 +1280,8 @@ pub enum InterInstr {
     Rts,
     Lsr(DTemp, DataSize, DTemp, DataSize),
     Lsri(Imm, DTemp, DataSize),
+    Tst(Place),
+    Tsti(Imm),                                  // Pre-calculate the CC and just move that to the CC using `MOVE <ea>, CCR`
     Bcc(usize),
     Bcs(usize),
     Beq(usize),
@@ -1185,6 +1298,11 @@ pub enum InterInstr {
 impl InterInstr {
 }
 
+pub struct LoopEnvironment {
+    break_label: usize,
+    continue_label: usize,
+}
+
 pub struct FunctionInterEnvironment {
     /// If this function returns an array or struct (even if its size < 4 bytes),
     /// then an extra variable, `"[retval]"`, will be passed in
@@ -1193,6 +1311,7 @@ pub struct FunctionInterEnvironment {
     pub lit_strings: Vec<(usize, String)>,
     cleanup_label: Option<usize>,
     cleanup_expr_created: bool,
+    loop_stack: Vec<LoopEnvironment>,
     pub return_type: TypeType,
     // dtemps and atemps can only hold variables up to 4 bytes
     // Variables greater than 4 bytes must be stored in vars.
@@ -1213,6 +1332,7 @@ impl FunctionInterEnvironment {
             lit_strings: Vec::new(),
             cleanup_label: None,
             cleanup_expr_created: false,
+            loop_stack: Vec::new(),
             return_type,
             dtemps: Vec::new(),
             atemps: Vec::new(),
@@ -1274,6 +1394,25 @@ impl FunctionInterEnvironment {
     // Retrieves saved regs from the stack
     pub fn retrieve_regs(regs: Vec<ADReg>, instrs: &mut Vec<InterInstr>) {
         todo!()
+    }
+    pub fn push_loop_stack(&mut self, break_label: usize, continue_label: usize) {
+        self.loop_stack.push(LoopEnvironment { break_label, continue_label })
+    }
+    pub fn get_break_label(&self) -> Option<usize> {
+        // Maybe someday, you could break 2 layers out using `break 2;`
+        match self.loop_stack.last() {
+            Some(loop_environment) => Some(loop_environment.break_label),
+            None => None,
+        }
+    }
+    pub fn get_continue_label(&self) -> Option<usize> {
+        match self.loop_stack.last() {
+            Some(loop_environment) => Some(loop_environment.continue_label),
+            None => None,
+        }
+    }
+    pub fn pop_loop_stack(&mut self) -> Option<LoopEnvironment>{
+        self.loop_stack.pop()
     }
     pub fn add_lit_string(&mut self, string: String, label_gen: &mut RangeFrom<usize>) -> usize {
         let ind = label_gen.next().unwrap();
@@ -1475,8 +1614,22 @@ impl Function {
                         let plan = ReturnPlan::Binop(b, place);
                         Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
                     },
+                    (ReturnPlan::Condition, _, _) => {
+                        let preference = nbe.type_preference(fienv, env)?;
+                        if !preference.is_magic(env) {
+                            return Err(format!("Cannot read type {} as a condition, because it is not magic", preference));
+                        }
+                        let dtemp = fienv.get_data_temp(preference.clone())?;
+                        let d_place = Place::DTemp(dtemp, preference);
+                        let plan = ReturnPlan::Move(d_place.clone());
+                        Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
+                        let plan = ReturnPlan::Binop(b, d_place.clone());
+                        Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
+                        // Condition Codes should be set
+                        d_place.free(fienv);
+                    }
                     (ReturnPlan::Return, true, _) => {
-                        return Err(format!("Cannot return array or struct type `{}` from binary expression", fienv.return_type));
+                        return Err(format!("Cannot return array or struct type `{}` from binary expression {}", fienv.return_type, b));
                     }
                     (ReturnPlan::Push(tt), _, _) => {
                         let dtemp = fienv.get_data_temp(tt.clone())?;
@@ -1536,6 +1689,9 @@ impl Function {
                     ReturnPlan::Move(place) => {
                         return Err(format!("Empty block expression but expected to move result to {}", place));
                     }
+                    ReturnPlan::Condition => {
+                        return Err(format!("Empty block expression but expected to get condition codes from expr"));
+                    }
                     ReturnPlan::Push(tt) => {
                         return Err(format!("Empty block expression but expected to push result of type {}", tt));
                     }
@@ -1579,7 +1735,7 @@ impl Function {
         match expr {
             Some(expr) => Self::compile_expr(expr, plan, instrs, label_gen, fienv, env),
             None => {
-                if fienv.return_type != TypeType::Id("void".to_string()) {
+                if fienv.return_type.is_void() {
                     Err(format!("Must give an expression to return for function with return type {}", fienv.return_type))
                 } else {
                     Ok(())
@@ -1636,6 +1792,9 @@ impl Function {
                         let instr = InterInstr::Puss(str_ind);
                         instrs.push(instr);
                     }
+                    ReturnPlan::Condition => {
+                        return Err(format!("Cannot get condition codes from string literal \"{}\"", string));
+                    }
                     ReturnPlan::Binop(b, _) =>  {
                         return Err(format!("Cannot do binary operation {} on string literal \"{}\"", b, string));
                     }
@@ -1649,6 +1808,7 @@ impl Function {
     pub fn compile_paren_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         Self::compile_expr(expr, plan, instrs, label_gen, fienv, env)
     }
+    /// Gets a reference to the given NonBinExpr and follows the given ReturnPlan with it.
     pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         // nbe needs to be an IdExpr
         if let NonBinExpr::IdExpr(id_expr) = nbe {
@@ -1666,7 +1826,15 @@ impl Function {
                             let instr = InterInstr::MoVA(field.name, to);
                             instrs.push(instr);
                             return Ok(());
-                        },
+                        }
+                        ReturnPlan::Condition => {
+                            let atemp = fienv.get_addr_temp()?;
+                            let a_place = Place::ATemp(atemp);
+                            let instr = InterInstr::MoVA(field.name, a_place.clone());
+                            instrs.push(instr);
+                            a_place.free(fienv);
+                            Ok(())
+                        }
                         ReturnPlan::Push(tt) => {
                             if tt != field.tt {
                                 return Err(format!("Cannot convert {} to {}", field.tt, tt));
@@ -1674,7 +1842,7 @@ impl Function {
                             let instr = InterInstr::PuVA(field.name);
                             instrs.push(instr);
                             return Ok(());
-                        },
+                        }
                         ReturnPlan::Return => {
                             fienv.retva(&field.name, instrs)?;
                             warn!("Returning reference to local variable `{}` from function", field.name);
@@ -1683,7 +1851,7 @@ impl Function {
                         ReturnPlan::None => {
                             // No return plan
                             return Ok(());
-                        },
+                        }
                     }
                 }
                 Place::ATemp(a) => {
@@ -1779,6 +1947,17 @@ impl Function {
                                 }
                             }
                         }
+                        ReturnPlan::Condition => {
+                            // Move from Ref to ATemp
+                            let atemp = fienv.get_addr_temp()?;
+                            let instr = InterInstr::Lea(a, d, off, atemp);
+                            instrs.push(instr);
+                            fienv.free_addr_temp(atemp);
+                            fienv.free_addr_temp(a);
+                            if let Some(d) = d { fienv.free_data_temp(d); }
+                            return Ok(());
+                            
+                        }
                         ReturnPlan::Push(to_tt) => {
                             if let TypeType::Pointer(to_val_tt) = &to_tt {
                                 if tt == **to_val_tt {
@@ -1870,6 +2049,18 @@ impl Function {
         }
         Ok(())
     }
+    fn eval_cond(cond: Expr, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
+        let tt = cond.type_preference(fienv, env)?;
+        // Maybe we could use D0--the return register--instead of getting a new register
+        // because we don't care about the actual value, only the condition codes
+        // Maybe CC should be a ReturnPlan??
+        let dtemp = fienv.get_data_temp(tt.clone())?;
+        let d_place = Place::DTemp(dtemp, tt.clone());
+        let plan = ReturnPlan::Move(d_place.clone());
+        Self::compile_expr(cond, plan, instrs, label_gen, fienv, env)?;
+        // Condition codes should be set accordingly. I hope they are.
+        Ok(d_place)
+    }
     pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match plan {
             ReturnPlan::None => {}
@@ -1878,24 +2069,17 @@ impl Function {
                     return Err(format!("Cannot return a value from if statement. Tried to return type {}", fienv.return_type));
                 }
             }
+            ReturnPlan::Condition => { return Err(format!("Cannot get condition codes from if statement.")); }
             ReturnPlan::Binop(b, _) => { return Err(format!("Cannot return a value from if statement. Tried to return to binop {}", b)); }
             ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from if statement.")); }
             ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from if statement. Tried to push type {}", tt)); }
         }
-        let tt = Environment::get_bool_tt();
-        // Maybe we could use D0--the return register--instead of getting a new register
-        // because we don't care about the actual value, only the condition codes
-        // Maybe CC should be a ReturnPlan??
-        let dtemp = fienv.get_data_temp(tt.clone())?;
-        let d_place = Place::DTemp(dtemp, tt.clone());
-        let cond_plan = ReturnPlan::Move(d_place.clone());
-        Self::compile_expr(cond, cond_plan, instrs, label_gen, fienv, env)?;
-        // Condition codes should be set accordingly. I hope they are.
+        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
         let f_label = label_gen.next().unwrap();
         let instr = InterInstr::Beq(f_label);
         instrs.push(instr);
         d_place.free(fienv);
-        Self::compile_expr(expr, plan.clone(), instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr, ReturnPlan::None, instrs, label_gen, fienv, env)?;
         let instr = InterInstr::Lbl(f_label);
         instrs.push(instr);
         if let ReturnPlan::Return = plan {
@@ -1905,30 +2089,181 @@ impl Function {
         Ok(())
     }
     pub fn compile_if_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: IfElse");
+        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
+        let f_label = label_gen.next().unwrap();
+        let e_label = label_gen.next().unwrap();    // end label
+        let instr = InterInstr::Beq(f_label);
+        instrs.push(instr);
+        d_place.free(fienv);
+        Self::compile_expr(expr1, plan.clone(), instrs, label_gen, fienv, env)?;
+        let instr = InterInstr::Goto(e_label);
+        instrs.push(instr);
+        let instr = InterInstr::Lbl(f_label);
+        instrs.push(instr);
+        Self::compile_expr(expr2, plan, instrs, label_gen, fienv, env)?;
+        let instr = InterInstr::Lbl(e_label);
+        instrs.push(instr);
         Ok(())
     }
     pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: UnlessExpr");
+        match plan {
+            ReturnPlan::None => {}
+            ReturnPlan::Return => {
+                if !fienv.return_type.is_void() {
+                    return Err(format!("Cannot return a value from unless statement. Tried to return type {}", fienv.return_type));
+                }
+            }
+            ReturnPlan::Condition => { return Err(format!("Cannot get condition codes from unless statement.")); }
+            ReturnPlan::Binop(b, _) => { return Err(format!("Cannot return a value from unless statement. Tried to return to binop {}", b)); }
+            ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from unless statement.")); }
+            ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from unless statement. Tried to push type {}", tt)); }
+        }
+        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
+        let f_label = label_gen.next().unwrap();
+        let instr = InterInstr::Bne(f_label);
+        instrs.push(instr);
+        d_place.free(fienv);
+        Self::compile_expr(expr, ReturnPlan::None, instrs, label_gen, fienv, env)?;
+        let instr = InterInstr::Lbl(f_label);
+        instrs.push(instr);
+        if let ReturnPlan::Return = plan {
+            let instr = InterInstr::Rts;
+            instrs.push(instr);
+        }
         Ok(())
     }
     pub fn compile_unless_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        Self::compile_if_else(cond, expr2, expr1, plan, instrs, label_gen, fienv, env)
+        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
+        let f_label = label_gen.next().unwrap();
+        let e_label = label_gen.next().unwrap();    // end_label
+        let instr = InterInstr::Bne(f_label);
+        instrs.push(instr);
+        d_place.free(fienv);
+        Self::compile_expr(expr1, plan.clone(), instrs, label_gen, fienv, env)?;
+        let instr = InterInstr::Goto(e_label);
+        instrs.push(instr);
+        let instr = InterInstr::Lbl(f_label);
+        instrs.push(instr);
+        Self::compile_expr(expr2, plan, instrs, label_gen, fienv, env)?;
+        let instr = InterInstr::Lbl(e_label);
+        instrs.push(instr);
+        Ok(())
     }
     pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: WhileExpr");
+        match plan {
+            ReturnPlan::None => {}
+            ReturnPlan::Return => {
+                if !fienv.return_type.is_void() {
+                    return Err(format!("Cannot return a value from while loop. Tried to return type {}", fienv.return_type));
+                }
+            }
+            ReturnPlan::Condition => { return Err(format!("Cannot get condition codes from while loop.")); }
+            ReturnPlan::Binop(b, _) => { return Err(format!("Cannot return a value from while loop. Tried to return to binop {}", b)); }
+            ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from while loop.")); }
+            ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from while loop. Tried to push type {}", tt)); }
+        }
+        let continue_label = label_gen.next().unwrap();
+        let break_label = label_gen.next().unwrap();
+        let instr = InterInstr::Lbl(continue_label);
+        instrs.push(instr);
+        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
+        let instr = InterInstr::Beq(break_label);
+        instrs.push(instr);
+        d_place.free(fienv);
+        fienv.push_loop_stack(break_label, continue_label);
+        Self::compile_expr(expr, ReturnPlan::None, instrs, label_gen, fienv, env)?;
+        fienv.pop_loop_stack();
+        let instr = InterInstr::Lbl(break_label);
+        instrs.push(instr);
+        if let ReturnPlan::Return = plan {
+            let instr = InterInstr::Rts;
+            instrs.push(instr);
+        }
         Ok(())
     }
     pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: DoWhile");
+        let tt = expr.type_preference(fienv, env)?;
+        let ret_place;
+        match &plan {
+            ReturnPlan::None => ret_place = None,
+            ReturnPlan::Return => {
+                if tt.is_array() || tt.is_struct() {
+                    return Err(format!("Returning arrays and structs from functions not yet supported"));
+                }
+                if fienv.return_type.is_void() {
+                    ret_place = None;
+                } else {
+                    let dtemp = fienv.get_data_temp(tt.clone())?;
+                    ret_place = Some(Place::DTemp(dtemp, tt));
+                }
+            }
+            ReturnPlan::Condition => {
+                if tt.is_array() || tt.is_struct() {
+                    return Err(format!("Cannot get condition codes from array or struct"));
+                }
+                let dtemp = fienv.get_data_temp(tt.clone())?;
+                ret_place = Some(Place::DTemp(dtemp, tt));
+            }
+            ReturnPlan::Binop(b, _) => {
+                if tt.is_array() || tt.is_struct() {
+                    return Err(format!("Cannot do binop {} on array or struct", b));
+                }
+                let dtemp = fienv.get_data_temp(tt.clone())?;
+                ret_place = Some(Place::DTemp(dtemp, tt));
+            }
+            ReturnPlan::Move(to) => ret_place = Some(to.clone()),
+            ReturnPlan::Push(push_tt) => {
+                let dtemp = fienv.get_data_temp(push_tt.clone())?;
+                ret_place = Some(Place::DTemp(dtemp, push_tt.clone()));
+            }
+        }
+        let continue_label = label_gen.next().unwrap();
+        let break_label = label_gen.next().unwrap();
+        let instr = InterInstr::Lbl(continue_label);
+        instrs.push(instr);
+        fienv.push_loop_stack(break_label, continue_label);
+        let body_plan = match &ret_place {
+            Some(ret_place) => ReturnPlan::Move(ret_place.clone()),
+            None => ReturnPlan::None,
+        };
+        Self::compile_expr(expr, body_plan, instrs, label_gen, fienv, env)?;
+        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
+        let instr = InterInstr::Bne(continue_label);
+        instrs.push(instr);
+        d_place.free(fienv);
+        fienv.pop_loop_stack();
+        let instr = InterInstr::Lbl(break_label);
+        instrs.push(instr);
+        if let Some(ret_place) = ret_place {
+            plan.into_inter_instr(ret_place, instrs, fienv, env)?;
+        } else if let ReturnPlan::Return = plan {
+            let instr = InterInstr::Rts;
+            instrs.push(instr);
+        }
         Ok(())
     }
-    pub fn compile_break(plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: Break");
+    pub fn compile_break(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, _label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
+        match fienv.get_break_label() {
+            Some(break_label) => {
+                let instr = InterInstr::Goto(break_label);
+                instrs.push(instr);
+            }
+            None => {
+                return Err(format!("Break found outside loop"));
+            }
+        }
         Ok(())
     }
-    pub fn compile_continue(plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        warn!("Not implemented: Continue");
+    pub fn compile_continue(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, _label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
+        match fienv.get_continue_label() {
+            Some(continue_label) => {
+                let instr = InterInstr::Goto(continue_label);
+                instrs.push(instr);
+            }
+            None => {
+                return Err(format!("Continue found outside loop"));
+            }
+        }
         Ok(())
     }
     // (id place, places of calculated offsets if any)
@@ -1978,6 +2313,7 @@ impl Function {
                                 if let NonBinExpr::LitExpr(Literal::Num(num)) = &**nbe {
                                     lit = Some(*num);
                                 }
+                                // TODO Handle struct member access here
                             }
                             match lit {
                                 Some(num) => {
