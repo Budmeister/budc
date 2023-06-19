@@ -499,7 +499,6 @@ impl std::fmt::Display for BudNonTerminal {
     }
 }
 
-use crate::m68k::{Environment, FunctionInterEnvironment};
 use crate::parse::Node;
 type BudNode = Node<BudTerminal, BudNonTerminal>;
 type BudNodes = Vec<BudNode>;
