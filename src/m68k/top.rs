@@ -219,7 +219,7 @@ impl BudExpander {
             debug!("Funcs: {:?}", funcs.iter().map(|x| x.0.to_owned()).collect::<Vec<String>>());
         }
         for (name, func) in funcs {
-            match func.compile(log_options, 0.., &environment) {
+            match func.compile(log_options, &environment) {
                 Ok(cfunc) => environment.compiled_funcs.push(cfunc),
                 Err(msg) => {
                     error!("In function {},", name);
@@ -702,8 +702,8 @@ impl Function {
             expr,
         })
     }
-    pub fn compile(self, log_options: &LoggingOptions, mut label_gen: RangeFrom<usize>, env: &Environment) -> Result<CompiledFunction, String> {
-        let (instrs, fienv) = Self::get_inter_instrs(self.expr, &self.signature, log_options, &mut label_gen, env)?;
+    pub fn compile(self, log_options: &LoggingOptions, env: &Environment) -> Result<CompiledFunction, String> {
+        let (instrs, fienv) = Self::get_inter_instrs(self.expr, &self.signature, log_options, env)?;
         let instrs = Self::get_instrs(instrs, fienv, env)?;
         let cfunc = CompiledFunction{ signature: self.signature, instructions: instrs };
         Ok(cfunc)

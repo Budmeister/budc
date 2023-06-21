@@ -232,6 +232,9 @@ impl Place {
     }
     // Returns None if the size is not a Byte, Word, or LWord
     pub fn get_data_size(&self, env: &Environment) -> Option<DataSize> {
+        if self.is_array() || self.is_struct() {
+            return None;
+        }
         let size = self.get_size(env);
         match size {
             1 => Some(DataSize::Byte),
@@ -247,7 +250,7 @@ impl Place {
             None => { return Err(format!("DTemp {} containing large value", d)); },
         };
         let a = fienv.get_addr_temp()?;
-        let d_place = Place::DTemp(d, tt.clone());
+        let d_place = Place::DTemp(d, tt);
         let a_place = Place::ATemp(a);
         let instr = InterInstr::Move(d_place, a_place);
         instrs.push(instr);
@@ -360,14 +363,14 @@ impl Place {
         match self {
             Place::ATemp(atemp) => Ok(Place::Ref(atemp, d, off, tt.clone())),
             Place::DTemp(d_, _) => {
-                if is_struct || is_array != None {
+                if is_struct || is_array.is_some() {
                     Err(format!("Cannot store structs or arrays in data registers"))
                 } else {
                     Ok(Place::Ref(Self::d_to_a(d_, tt.clone(), instrs, fienv, env)?, d, off, tt.clone()))
                 }
             },
             Place::Ref(a, mut d_, off_, _) => {
-                if is_struct || is_array != None {
+                if is_struct || is_array.is_some() {
                     // Shift this Ref by the amount given
                     if let Some(d) = d {
                         if let Some(d_) = d_ {
@@ -394,7 +397,7 @@ impl Place {
             Place::Var(Field { ref name, tt: _ }) => {
                 let a = fienv.get_addr_temp()?;
                 let a_place = Place::ATemp(a);
-                let instr = if is_struct || is_array != None {
+                let instr = if is_struct || is_array.is_some() {
                     InterInstr::MoVA(name.clone(), a_place)
                 } else {
                     // self must be a pointer
@@ -662,6 +665,7 @@ pub struct FunctionInterEnvironment {
     cleanup_label: Option<usize>,
     cleanup_expr_created: bool,
     loop_stack: Vec<LoopEnvironment>,
+    pub label_gen: RangeFrom<usize>,
     // dtemps and atemps can only hold variables up to 4 bytes
     // Variables greater than 4 bytes must be stored in vars.
     // They cannot be returned from expressions (until that is 
@@ -680,6 +684,7 @@ impl FunctionInterEnvironment {
             cleanup_label: None,
             cleanup_expr_created: false,
             loop_stack: Vec::new(),
+            label_gen: 0..,
             dtemps: Vec::new(),
             atemps: Vec::new(),
         }
@@ -749,8 +754,8 @@ impl FunctionInterEnvironment {
     pub fn pop_loop_stack(&mut self) -> Option<LoopEnvironment>{
         self.loop_stack.pop()
     }
-    pub fn add_lit_string(&mut self, string: String, label_gen: &mut RangeFrom<usize>) -> usize {
-        let ind = label_gen.next().unwrap();
+    pub fn add_lit_string(&mut self, string: String) -> usize {
+        let ind = self.get_new_label();
         self.lit_strings.push((ind, string));
         ind
     }
@@ -779,11 +784,14 @@ impl FunctionInterEnvironment {
             Ok(())
         }
     }
-    pub fn get_cleanup_label(&mut self, label_gen: &mut RangeFrom<usize>) -> usize {
+    pub fn get_new_label(&mut self) -> usize {
+        self.label_gen.next().unwrap()
+    }
+    pub fn get_cleanup_label(&mut self) -> usize {
         if let Some(label) = self.cleanup_label {
             label
         } else {
-            let label = label_gen.next().unwrap();
+            let label = self.get_new_label();
             self.cleanup_label = Some(label);
             label
         }
@@ -845,7 +853,7 @@ impl Function {
     pub fn get_name(&self) -> String {
         self.signature.name.name.to_owned()
     }
-    pub fn get_inter_instrs(expr: Expr, signature: &Signature, log_options: &LoggingOptions, label_gen: &mut RangeFrom<usize>, env: &Environment) -> Result<(Vec<InterInstr>, FunctionInterEnvironment), String> {
+    pub fn get_inter_instrs(expr: Expr, signature: &Signature, log_options: &LoggingOptions, env: &Environment) -> Result<(Vec<InterInstr>, FunctionInterEnvironment), String> {
         let mut instrs = Vec::new();
         let mut fienv = FunctionInterEnvironment::new(signature.clone());
         let plan;
@@ -864,7 +872,6 @@ impl Function {
             expr,
             plan,
             &mut instrs,
-            label_gen,
             &mut fienv,
             env,
         )?;
@@ -885,17 +892,17 @@ impl Function {
         }
         Ok((instrs, fienv))
     }
-    pub fn compile_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         Self::compile_bin_expr(*expr.bin_expr,
             if expr.with_semicolon {
                 ReturnPlan::None
             } else {
                 plan
             },
-            instrs, label_gen, fienv, env)?;
+            instrs, fienv, env)?;
         Ok(())
     }
-    pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match be {
             BinExpr::Binary(nbe, b, be) => {
                 let retreg = Place::DTemp(0, fienv.return_type());
@@ -908,16 +915,16 @@ impl Function {
                         let dtemp = fienv.get_data_temp(tt.clone())?;
                         let d_place = Place::DTemp(dtemp, tt);
                         let plan = ReturnPlan::Move(d_place.clone());
-                        Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
+                        Self::compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
                         let plan = ReturnPlan::Binop(b, d_place.clone());
-                        Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
+                        Self::compile_bin_expr(*be, plan, instrs, fienv, env)?;
                         ReturnPlan::Binop(pb, place).into_inter_instr(d_place, instrs, fienv, env)?;
                     },
                     (ReturnPlan::Move(place), _, _) | (ReturnPlan::Return, false, place) => {
                         let plan = ReturnPlan::Move(place.clone());
-                        Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
+                        Self::compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
                         let plan = ReturnPlan::Binop(b, place);
-                        Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
+                        Self::compile_bin_expr(*be, plan, instrs, fienv, env)?;
                     },
                     (ReturnPlan::Condition, _, _) => {
                         let preference = nbe.type_preference(fienv, env)?;
@@ -927,9 +934,9 @@ impl Function {
                         let dtemp = fienv.get_data_temp(preference.clone())?;
                         let d_place = Place::DTemp(dtemp, preference);
                         let plan = ReturnPlan::Move(d_place.clone());
-                        Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
+                        Self::compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
                         let plan = ReturnPlan::Binop(b, d_place.clone());
-                        Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
+                        Self::compile_bin_expr(*be, plan, instrs, fienv, env)?;
                         // Condition Codes should be set
                         d_place.free(fienv);
                     }
@@ -940,49 +947,49 @@ impl Function {
                         let dtemp = fienv.get_data_temp(tt.clone())?;
                         let d_place = Place::DTemp(dtemp, tt.clone());
                         let plan = ReturnPlan::Move(d_place.clone());
-                        Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
+                        Self::compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
                         let plan = ReturnPlan::Binop(b, d_place.clone());
-                        Self::compile_bin_expr(*be, plan, instrs, label_gen, fienv, env)?;
+                        Self::compile_bin_expr(*be, plan, instrs, fienv, env)?;
                         let instr = InterInstr::Push(d_place, tt);
                         fienv.free_data_temp(dtemp);
                         instrs.push(instr);
                     },
                     (ReturnPlan::None, _, _) => {
-                        Self::compile_non_bin_expr(*nbe, ReturnPlan::None, instrs, label_gen, fienv, env)?;
-                        Self::compile_bin_expr(*be, ReturnPlan::None, instrs, label_gen, fienv, env)?;
+                        Self::compile_non_bin_expr(*nbe, ReturnPlan::None, instrs, fienv, env)?;
+                        Self::compile_bin_expr(*be, ReturnPlan::None, instrs, fienv, env)?;
                     },
                 }
 
             },
             BinExpr::NonBin(nbe) => {
-                Self::compile_non_bin_expr(*nbe, plan, instrs, label_gen, fienv, env)?;
+                Self::compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
             },
         }
         Ok(())
     }
-    pub fn compile_non_bin_expr(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_non_bin_expr(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match nbe {
-            NonBinExpr::BlockExpr(exprs)        => Self::compile_block_expr(exprs, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::AssignExpr(id, expr)    => Self::compile_assign_expr(*id, *expr, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::VarDeclAssgn(vd, expr)  => Self::compile_var_decl_assign(*vd, *expr, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::ReturnExpr(expr)       => Self::compile_return_expr(expr.map(|x| *x), plan, instrs, label_gen, fienv, env),
-            NonBinExpr::CleanupCall         => Self::compile_cleanup_call(plan, instrs, label_gen, fienv, env),
-            NonBinExpr::CleanupExpr(expr)      => Self::compile_cleanup_expr(*expr, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::IdExpr(id)           => Self::compile_id_expr(*id, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::LitExpr(lit)          => Self::compile_lit_expr(lit, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::ParenExpr(expr)        => Self::compile_paren_expr(*expr, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::UnaryExpr(un, expr)     => Self::compile_unary_expr(un, *expr, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::IfExpr(cond, expr)        => Self::compile_if_expr(*cond, *expr, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::IfElse(cond, expr1, expr2)     => Self::compile_if_else(*cond, *expr1, *expr2, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::UnlExpr(cond, expr)       => Self::compile_unless_expr(*cond, *expr, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::UnlElse(cond, expr1, expr2)    => Self::compile_unless_else(*cond, *expr1, *expr2, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::WhileExpr(cond, expr)     => Self::compile_while_expr(*cond, *expr, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::DoWhile(expr, cond)       => Self::compile_do_while(*cond, *expr, plan, instrs, label_gen, fienv, env),
-            NonBinExpr::Break               => Self::compile_break(plan, instrs, label_gen, fienv, env),
-            NonBinExpr::Continue            => Self::compile_continue(plan, instrs, label_gen, fienv, env),
+            NonBinExpr::BlockExpr(exprs)        => Self::compile_block_expr(exprs, plan, instrs, fienv, env),
+            NonBinExpr::AssignExpr(id, expr)    => Self::compile_assign_expr(*id, *expr, plan, instrs, fienv, env),
+            NonBinExpr::VarDeclAssgn(vd, expr)  => Self::compile_var_decl_assign(*vd, *expr, plan, instrs, fienv, env),
+            NonBinExpr::ReturnExpr(expr)       => Self::compile_return_expr(expr.map(|x| *x), plan, instrs, fienv, env),
+            NonBinExpr::CleanupCall         => Self::compile_cleanup_call(plan, instrs, fienv, env),
+            NonBinExpr::CleanupExpr(expr)      => Self::compile_cleanup_expr(*expr, plan, instrs, fienv, env),
+            NonBinExpr::IdExpr(id)           => Self::compile_id_expr(*id, plan, instrs, fienv, env),
+            NonBinExpr::LitExpr(lit)          => Self::compile_lit_expr(lit, plan, instrs, fienv, env),
+            NonBinExpr::ParenExpr(expr)        => Self::compile_paren_expr(*expr, plan, instrs, fienv, env),
+            NonBinExpr::UnaryExpr(un, expr)     => Self::compile_unary_expr(un, *expr, plan, instrs, fienv, env),
+            NonBinExpr::IfExpr(cond, expr)        => Self::compile_if_expr(*cond, *expr, plan, instrs, fienv, env),
+            NonBinExpr::IfElse(cond, expr1, expr2)     => Self::compile_if_else(*cond, *expr1, *expr2, plan, instrs, fienv, env),
+            NonBinExpr::UnlExpr(cond, expr)       => Self::compile_unless_expr(*cond, *expr, plan, instrs, fienv, env),
+            NonBinExpr::UnlElse(cond, expr1, expr2)    => Self::compile_unless_else(*cond, *expr1, *expr2, plan, instrs, fienv, env),
+            NonBinExpr::WhileExpr(cond, expr)     => Self::compile_while_expr(*cond, *expr, plan, instrs, fienv, env),
+            NonBinExpr::DoWhile(expr, cond)       => Self::compile_do_while(*cond, *expr, plan, instrs, fienv, env),
+            NonBinExpr::Break               => Self::compile_break(plan, instrs, fienv, env),
+            NonBinExpr::Continue            => Self::compile_continue(plan, instrs, fienv, env),
         }
     }
-    pub fn compile_block_expr(mut exprs: Vec<Expr>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_block_expr(mut exprs: Vec<Expr>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         let last = match exprs.pop() {
             Some(expr) => expr,
             None => {
@@ -1011,34 +1018,34 @@ impl Function {
         };
 
         for expr in exprs {
-            Self::compile_expr(expr, ReturnPlan::None, instrs, label_gen, fienv, env)?;
+            Self::compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
             // Check that the expressions have semicolons?
             // If we were to print errors and recover, this would be a good point to do it
         }
-        Self::compile_expr(last, plan, instrs, label_gen, fienv, env)?;
+        Self::compile_expr(last, plan, instrs, fienv, env)?;
         Ok(())
     }
-    pub fn compile_assign_expr(id: IdExpr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_assign_expr(id: IdExpr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         // Check that the variable exists
-        let place = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
+        let place = Self::place_from_id_expr(id, instrs, fienv, env)?;
         let assign_plan = ReturnPlan::Move(place.clone());
-        Self::compile_expr(expr, assign_plan, instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr, assign_plan, instrs, fienv, env)?;
         plan.into_inter_instr(place, instrs, fienv, env)?;
         Ok(())
     }
-    pub fn compile_var_decl_assign(vd: VarDecl, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_var_decl_assign(vd: VarDecl, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         let field = Field::new(vd, env);
         fienv.add_var(&field)?;
         let place = Place::Var(field);
         let assign_plan = ReturnPlan::Move(place.clone());
-        Self::compile_expr(expr, assign_plan, instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr, assign_plan, instrs, fienv, env)?;
         plan.into_inter_instr(place, instrs, fienv, env)?;
         Ok(())
     }
-    pub fn compile_return_expr(expr: Option<Expr>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_return_expr(expr: Option<Expr>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         let plan = ReturnPlan::Return;
         match expr {
-            Some(expr) => Self::compile_expr(expr, plan, instrs, label_gen, fienv, env),
+            Some(expr) => Self::compile_expr(expr, plan, instrs, fienv, env),
             None => {
                 if fienv.return_type().is_void() {
                     Err(format!("Must give an expression to return for function with return type {}", fienv.return_type()))
@@ -1048,23 +1055,23 @@ impl Function {
             }
         }
     }
-    pub fn compile_cleanup_call(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
-        let cleanup_label = fienv.get_cleanup_label(label_gen);
+    pub fn compile_cleanup_call(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
+        let cleanup_label = fienv.get_cleanup_label();
         let instr = InterInstr::Goto(cleanup_label);
         instrs.push(instr);
         Ok(())
     }
-    pub fn compile_cleanup_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_cleanup_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         if fienv.cleanup_expr_created {
             return Err(format!("Found more than one cleanup expression. There should only be one."));
         }
         match plan {
             ReturnPlan::Return => {
-                let cleanup_label = fienv.get_cleanup_label(label_gen);
+                let cleanup_label = fienv.get_cleanup_label();
                 let instr = InterInstr::Lbl(cleanup_label);
                 instrs.push(instr);
                 fienv.cleanup_expr_created = true;
-                Self::compile_expr(expr, ReturnPlan::Return, instrs, label_gen, fienv, env)?;
+                Self::compile_expr(expr, ReturnPlan::Return, instrs, fienv, env)?;
                 Ok(())
             }
             _ => {
@@ -1072,18 +1079,18 @@ impl Function {
             }
         }
     }
-    pub fn compile_id_expr(id: IdExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        let place = Self::place_from_id_expr(id, instrs, label_gen, fienv, env)?;
+    pub fn compile_id_expr(id: IdExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        let place = Self::place_from_id_expr(id, instrs, fienv, env)?;
         plan.into_inter_instr(place, instrs, fienv, env)?;
         Ok(())
     }
-    pub fn compile_lit_expr(lit: Literal, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_lit_expr(lit: Literal, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match lit {
             Literal::Num(num) => {
                 plan.imm_into_inter_instr(Imm::LWord(num), instrs, fienv, env)?;
             }
             Literal::Str(string) => {
-                let str_ind = fienv.add_lit_string(string.clone(), label_gen);
+                let str_ind = fienv.add_lit_string(string.clone());
                 match plan {
                     ReturnPlan::Move(to) => {
                         let instr = InterInstr::Movs(str_ind, to);
@@ -1110,14 +1117,14 @@ impl Function {
         }
         Ok(())
     }
-    pub fn compile_paren_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        Self::compile_expr(expr, plan, instrs, label_gen, fienv, env)
+    pub fn compile_paren_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        Self::compile_expr(expr, plan, instrs, fienv, env)
     }
     /// Gets a reference to the given NonBinExpr and follows the given ReturnPlan with it.
-    pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         // nbe needs to be an IdExpr
         if let NonBinExpr::IdExpr(id_expr) = nbe {
-            let place = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
+            let place = Self::place_from_id_expr(*id_expr, instrs, fienv, env)?;
             if let ReturnPlan::Binop(b, _) = plan {
                 return Err(format!("Binop {} not supported with references yet", b));
             }
@@ -1304,10 +1311,10 @@ impl Function {
             Err(format!("Cannot get reference to non-IdExpr"))
         }
     }
-    pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         let tt = plan.get_type(fienv);
         if let BudUnop::Ref = un {
-            return Self::get_reference(nbe, plan, instrs, label_gen, fienv, env);
+            return Self::get_reference(nbe, plan, instrs, fienv, env);
         }
         if let Some(tt) = &tt {
             if !tt.is_magic(env) {
@@ -1323,7 +1330,7 @@ impl Function {
                 un
             ) => {
                 // Store result of `nbe` into `to`, and then do the unop on `to`
-                Self::compile_non_bin_expr(nbe, plan, instrs, label_gen, fienv, env)?;
+                Self::compile_non_bin_expr(nbe, plan, instrs, fienv, env)?;
                 let instr = match un {
                     BudUnop::Neg => InterInstr::Neg(to),
                     BudUnop::Not => InterInstr::Bnot(to),
@@ -1334,7 +1341,7 @@ impl Function {
             (ReturnPlan::Binop(BudBinop::And | BudBinop::Or, _), BudUnop::Neg) | 
             (ReturnPlan::None, _) => {
                 // Store the result of `nbe` into `to`, but do not do the unop
-                Self::compile_non_bin_expr(nbe, plan, instrs, label_gen, fienv, env)?;
+                Self::compile_non_bin_expr(nbe, plan, instrs, fienv, env)?;
             }
             (_, BudUnop::Ref) => panic!("Ref should be handled above in this function"),
             (_, un) => {
@@ -1354,7 +1361,7 @@ impl Function {
         }
         Ok(())
     }
-    fn eval_cond(cond: Expr, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
+    fn eval_cond(cond: Expr, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
         let tt = cond.type_preference(fienv, env)?;
         // Maybe we could use D0--the return register--instead of getting a new register
         // because we don't care about the actual value, only the condition codes
@@ -1362,11 +1369,11 @@ impl Function {
         let dtemp = fienv.get_data_temp(tt.clone())?;
         let d_place = Place::DTemp(dtemp, tt);
         let plan = ReturnPlan::Move(d_place.clone());
-        Self::compile_expr(cond, plan, instrs, label_gen, fienv, env)?;
+        Self::compile_expr(cond, plan, instrs, fienv, env)?;
         // Condition codes should be set accordingly. I hope they are.
         Ok(d_place)
     }
-    pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match plan {
             ReturnPlan::None => {}
             ReturnPlan::Return => {
@@ -1379,12 +1386,12 @@ impl Function {
             ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from if statement.")); }
             ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from if statement. Tried to push type {}", tt)); }
         }
-        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
-        let f_label = label_gen.next().unwrap();
+        let d_place = Self::eval_cond(cond, instrs, fienv, env)?;
+        let f_label = fienv.get_new_label();
         let instr = InterInstr::Beq(f_label);
         instrs.push(instr);
         d_place.free(fienv);
-        Self::compile_expr(expr, ReturnPlan::None, instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
         let instr = InterInstr::Lbl(f_label);
         instrs.push(instr);
         if let ReturnPlan::Return = plan {
@@ -1393,24 +1400,24 @@ impl Function {
         }
         Ok(())
     }
-    pub fn compile_if_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
-        let f_label = label_gen.next().unwrap();
-        let e_label = label_gen.next().unwrap();    // end label
+    pub fn compile_if_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        let d_place = Self::eval_cond(cond, instrs, fienv, env)?;
+        let f_label = fienv.get_new_label();
+        let e_label = fienv.get_new_label();    // end label
         let instr = InterInstr::Beq(f_label);
         instrs.push(instr);
         d_place.free(fienv);
-        Self::compile_expr(expr1, plan.clone(), instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr1, plan.clone(), instrs, fienv, env)?;
         let instr = InterInstr::Goto(e_label);
         instrs.push(instr);
         let instr = InterInstr::Lbl(f_label);
         instrs.push(instr);
-        Self::compile_expr(expr2, plan, instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr2, plan, instrs, fienv, env)?;
         let instr = InterInstr::Lbl(e_label);
         instrs.push(instr);
         Ok(())
     }
-    pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match plan {
             ReturnPlan::None => {}
             ReturnPlan::Return => {
@@ -1423,12 +1430,12 @@ impl Function {
             ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from unless statement.")); }
             ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from unless statement. Tried to push type {}", tt)); }
         }
-        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
-        let f_label = label_gen.next().unwrap();
+        let d_place = Self::eval_cond(cond, instrs, fienv, env)?;
+        let f_label = fienv.get_new_label();
         let instr = InterInstr::Bne(f_label);
         instrs.push(instr);
         d_place.free(fienv);
-        Self::compile_expr(expr, ReturnPlan::None, instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
         let instr = InterInstr::Lbl(f_label);
         instrs.push(instr);
         if let ReturnPlan::Return = plan {
@@ -1437,24 +1444,24 @@ impl Function {
         }
         Ok(())
     }
-    pub fn compile_unless_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
-        let f_label = label_gen.next().unwrap();
-        let e_label = label_gen.next().unwrap();    // end_label
+    pub fn compile_unless_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+        let d_place = Self::eval_cond(cond, instrs, fienv, env)?;
+        let f_label = fienv.get_new_label();
+        let e_label = fienv.get_new_label();    // end_label
         let instr = InterInstr::Bne(f_label);
         instrs.push(instr);
         d_place.free(fienv);
-        Self::compile_expr(expr1, plan.clone(), instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr1, plan.clone(), instrs, fienv, env)?;
         let instr = InterInstr::Goto(e_label);
         instrs.push(instr);
         let instr = InterInstr::Lbl(f_label);
         instrs.push(instr);
-        Self::compile_expr(expr2, plan, instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr2, plan, instrs, fienv, env)?;
         let instr = InterInstr::Lbl(e_label);
         instrs.push(instr);
         Ok(())
     }
-    pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match plan {
             ReturnPlan::None => {}
             ReturnPlan::Return => {
@@ -1467,16 +1474,16 @@ impl Function {
             ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from while loop.")); }
             ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from while loop. Tried to push type {}", tt)); }
         }
-        let continue_label = label_gen.next().unwrap();
-        let break_label = label_gen.next().unwrap();
+        let continue_label = fienv.get_new_label();
+        let break_label = fienv.get_new_label();
         let instr = InterInstr::Lbl(continue_label);
         instrs.push(instr);
-        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
+        let d_place = Self::eval_cond(cond, instrs, fienv, env)?;
         let instr = InterInstr::Beq(break_label);
         instrs.push(instr);
         d_place.free(fienv);
         fienv.push_loop_stack(break_label, continue_label);
-        Self::compile_expr(expr, ReturnPlan::None, instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
         fienv.pop_loop_stack();
         let instr = InterInstr::Lbl(break_label);
         instrs.push(instr);
@@ -1486,7 +1493,7 @@ impl Function {
         }
         Ok(())
     }
-    pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         let tt = expr.type_preference(fienv, env)?;
         let ret_place;
         match &plan {
@@ -1522,8 +1529,8 @@ impl Function {
                 ret_place = Some(Place::DTemp(dtemp, push_tt.clone()));
             }
         }
-        let continue_label = label_gen.next().unwrap();
-        let break_label = label_gen.next().unwrap();
+        let continue_label = fienv.get_new_label();
+        let break_label = fienv.get_new_label();
         let instr = InterInstr::Lbl(continue_label);
         instrs.push(instr);
         fienv.push_loop_stack(break_label, continue_label);
@@ -1531,8 +1538,8 @@ impl Function {
             Some(ret_place) => ReturnPlan::Move(ret_place.clone()),
             None => ReturnPlan::None,
         };
-        Self::compile_expr(expr, body_plan, instrs, label_gen, fienv, env)?;
-        let d_place = Self::eval_cond(cond, instrs, label_gen, fienv, env)?;
+        Self::compile_expr(expr, body_plan, instrs, fienv, env)?;
+        let d_place = Self::eval_cond(cond, instrs, fienv, env)?;
         let instr = InterInstr::Bne(continue_label);
         instrs.push(instr);
         d_place.free(fienv);
@@ -1547,7 +1554,7 @@ impl Function {
         }
         Ok(())
     }
-    pub fn compile_break(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, _label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
+    pub fn compile_break(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
         match fienv.get_break_label() {
             Some(break_label) => {
                 let instr = InterInstr::Goto(break_label);
@@ -1559,7 +1566,7 @@ impl Function {
         }
         Ok(())
     }
-    pub fn compile_continue(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, _label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
+    pub fn compile_continue(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
         match fienv.get_continue_label() {
             Some(continue_label) => {
                 let instr = InterInstr::Goto(continue_label);
@@ -1572,7 +1579,7 @@ impl Function {
         Ok(())
     }
 
-    pub fn call_func(id: String, offsets: Vec<Expr>, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
+    pub fn call_func(id: String, offsets: Vec<Expr>, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
         // Check if it's a function call
         match env.global_funcs.get(&id) {
             Some(sig) => {
@@ -1587,7 +1594,7 @@ impl Function {
                 instrs.push(instr);
                 // Maybe I should use a separate number generator in fienv for
                 // StackMarkers, but I'm lazy
-                let marker = label_gen.next().unwrap();
+                let marker = fienv.get_new_label();
                 let instr = InterInstr::SMarker(marker);
                 instrs.push(instr);
                 for (i, offset) in offsets.into_iter().enumerate() {
@@ -1599,7 +1606,7 @@ impl Function {
                         tt
                     };
                     let plan = ReturnPlan::Push(tt);
-                    Self::compile_expr(offset, plan, instrs, label_gen, fienv, env)?;
+                    Self::compile_expr(offset, plan, instrs, fienv, env)?;
                 }
                 let instr = InterInstr::Save;
                 instrs.push(instr);
@@ -1642,14 +1649,14 @@ impl Function {
     /// object or read from it. 
     /// 
     /// `}`
-    pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, label_gen: &mut RangeFrom<usize>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
+    pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
         match id {
             IdExpr::SquareIndex(id, offset) => {
                 // The id must be assignable
                 match *id.bin_expr {
                     BinExpr::NonBin(nbe) => {
                         if let NonBinExpr::IdExpr(id_expr) = *nbe {
-                            let id_place = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
+                            let id_place = Self::place_from_id_expr(*id_expr, instrs, fienv, env)?;
                             // Check if the offset is a literal value
                             let mut lit = None;
                             if let BinExpr::NonBin(nbe) = &*offset.bin_expr {
@@ -1668,7 +1675,7 @@ impl Function {
                                     let off_temp = fienv.get_data_temp(tt.clone())?;   // offset as an index (not multiplied by sizeof(T))
                                     let off_place = Place::DTemp(off_temp, tt);
                                     let plan = ReturnPlan::Move(off_place);
-                                    Self::compile_expr(*offset, plan, instrs, label_gen, fienv, env)?;
+                                    Self::compile_expr(*offset, plan, instrs, fienv, env)?;
                                     let place = id_place.index_into(Some(off_temp), 0, false, instrs, fienv, env)?;
                                     return Ok(place);
                                 }
@@ -1706,7 +1713,7 @@ impl Function {
                                     }
                                     None => {
                                         // Check if it's a function call
-                                        return Self::call_func(id, offsets, instrs, label_gen, fienv, env);
+                                        return Self::call_func(id, offsets, instrs, fienv, env);
                                     }
                                 }
                             } else {
@@ -1717,7 +1724,7 @@ impl Function {
                                 } else {
                                     return Err(format!("Array indexing with () should only get 1 argument, but {} were given", offsets.len()));
                                 }
-                                Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?
+                                Self::place_from_id_expr(*id_expr, instrs, fienv, env)?
                             };
 
                             // Check if the offset is a literal value
@@ -1737,7 +1744,7 @@ impl Function {
                                     let off_temp = fienv.get_data_temp(tt.clone())?;   // offset as an index (not multiplied by sizeof(T))
                                     let off_place = Place::DTemp(off_temp, tt);
                                     let plan = ReturnPlan::Move(off_place);
-                                    Self::compile_expr(offset, plan, instrs, label_gen, fienv, env)?;
+                                    Self::compile_expr(offset, plan, instrs, fienv, env)?;
                                     let place = id_place.index_into(Some(off_temp), 0, true, instrs, fienv, env)?;
                                     return Ok(place);
                                 }
@@ -1767,7 +1774,7 @@ impl Function {
             IdExpr::Deref(id_expr) => {
                 // We need to store the result of expr into the memory
                 // location pointed to by the variable, id
-                let place = Self::place_from_id_expr(*id_expr, instrs, label_gen, fienv, env)?;
+                let place = Self::place_from_id_expr(*id_expr, instrs, fienv, env)?;
                 Ok(place.index_into(None, 0, false, instrs, fienv, env)?)
             },
         }

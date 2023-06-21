@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ops::RangeFrom;
 
 use crate::bud::BudBinop;
 use crate::m68k::intermediate::*;
@@ -31,6 +32,7 @@ pub struct FunctionEnvironment {
     atemp_map: HashMap<ATemp, Option<AReg>>,
     extra_stack_height: usize,
     stack_frame: HashMap<StackItem, i32>,
+    label_gen: RangeFrom<usize>,
 }
 impl FunctionEnvironment {
     pub fn new(
@@ -39,6 +41,7 @@ impl FunctionEnvironment {
         vars: Vec<Field>,
         dtemp_map: HashMap<DTemp, Option<DReg>>,
         atemp_map: HashMap<ATemp, Option<AReg>>,
+        label_gen: RangeFrom<usize>,
         env: &Environment,
     ) -> FunctionEnvironment {
         let stack_frame =
@@ -48,6 +51,7 @@ impl FunctionEnvironment {
             vars,
             dtemp_map,
             atemp_map,
+            label_gen,
             extra_stack_height: 0,
             stack_frame,
         }
@@ -275,6 +279,9 @@ impl FunctionEnvironment {
             }
         }
     }
+    fn get_new_label(&mut self) -> usize {
+        self.label_gen.next().unwrap()
+    }
 }
 
 pub type StackMarker = usize;
@@ -320,6 +327,7 @@ impl Function {
             fienv.vars,
             dtemp_map,
             atemp_map,
+            fienv.label_gen,
             env,
         );
         for iinstr in iinstrs {
@@ -475,117 +483,102 @@ impl Function {
         env: &Environment,
     ) -> Result<(), String> {
         match iinstr {
-            InterInstr::Binop(left, b, right) => {
+            InterInstr::Binop(src, b, dest) => {
+                if src.is_array()
+                    || src.is_struct()
+                    || dest.is_array()
+                    || dest.is_struct()
+                {
+                    return Err(format!(
+                        "Cannot do binop {} on types {} and {}",
+                        b,
+                        src.get_type(),
+                        dest.get_type()
+                    ));
+                }
+                let size_dest = dest.get_data_size(env).unwrap();
+                let size_src = src.get_data_size(env).unwrap();
                 match b {
                     BudBinop::Plus => {
-                        let size = match right.get_data_size(env) {
-                            Some(size) => size,
-                            None => {
-                                return Err(format!(
-                                    "Cannot do binop {} on type {}",
-                                    b,
-                                    right.get_type()
-                                ))
-                            }
-                        };
-                        let left = fenv.place_to_addr_mode(left, instrs, Proxy1)?;
-                        let right = fenv.place_to_addr_mode(right, instrs, Proxy2)?;
-                        let instr = Instruction::Add(size, left, right).validate()?;
+                        let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
+                        let dest = fenv.place_to_addr_mode(dest, instrs, Proxy2)?;
+                        let instr = Add(size_dest, src, dest).validate()?;
                         instrs.push(instr);
                         Ok(())
                     }
                     BudBinop::Minus => {
-                        let size = match right.get_data_size(env) {
-                            Some(size) => size,
-                            None => {
-                                return Err(format!(
-                                    "Cannot do binop {} on type {}",
-                                    b,
-                                    right.get_type()
-                                ))
-                            }
-                        };
-                        let left = fenv.place_to_addr_mode(left, instrs, Proxy1)?;
-                        let right = fenv.place_to_addr_mode(right, instrs, Proxy2)?;
-                        let instr = Instruction::Sub(size, left, right).validate()?;
+                        let size = dest.get_data_size(env).unwrap();
+                        let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
+                        let dest = fenv.place_to_addr_mode(dest, instrs, Proxy2)?;
+                        let instr = Sub(size, src, dest).validate()?;
                         instrs.push(instr);
                         Ok(())
                     }
                     BudBinop::Times => {
-                        if left.is_array()
-                            || left.is_struct()
-                            || right.is_array()
-                            || right.is_struct()
-                        {
-                            return Err(format!(
-                                "Cannot do binop {} on types {} and {}",
-                                b,
-                                left.get_type(),
-                                right.get_type()
-                            ));
-                        }
-                        let size_right = right.get_data_size(env).unwrap();
-                        let size_left = left.get_data_size(env).unwrap();
-                        if size_right == DataSize::LWord || size_left == DataSize::LWord {
+                        if size_src == DataSize::LWord || size_dest == DataSize::LWord {
                             warn!("Multiplication on 32 bit integers will cast to 16 bit integers")
                         }
-                        let left = fenv.place_to_addr_mode(left, instrs, Proxy1)?;
-                        let (right_dreg, live) =
-                            fenv.place_to_dreg(right.clone(), instrs, env, Proxy2)?;
-                        let instr = Instruction::Muls(left, right_dreg).validate()?;
+                        let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
+                        let (dest_dreg, live) =
+                            fenv.place_to_dreg(dest.clone(), instrs, env, Proxy2)?;
+                        let instr = Muls(src, dest_dreg).validate()?;
                         instrs.push(instr);
                         if !live {
-                            let right_real = fenv.place_to_addr_mode(right, instrs, Proxy1)?;
-                            let right_dead = AddrMode::D(right_dreg);
+                            let dest_real = fenv.place_to_addr_mode(dest, instrs, Proxy1)?;
+                            let dest_dead = AddrMode::D(dest_dreg);
                             let size = DataSize::Word;
-                            let instr = Move(size, right_dead, right_real).validate()?;
+                            let instr = Move(size, dest_dead, dest_real).validate()?;
                             instrs.push(instr);
                         }
                         Ok(())
                     }
                     BudBinop::Div => {
-                        if left.is_array()
-                            || left.is_struct()
-                            || right.is_array()
-                            || right.is_struct()
-                        {
-                            return Err(format!(
-                                "Cannot do binop {} on types {} and {}",
-                                b,
-                                left.get_type(),
-                                right.get_type()
-                            ));
-                        }
-                        let size_right = right.get_data_size(env).unwrap();
-                        let size_left = left.get_data_size(env).unwrap();
-                        if size_left == DataSize::LWord {
+                        if size_src == DataSize::LWord {
                             warn!("Division on 32 bit integers will cast to 16 bit integers")
                         }
                         // Assume divide signed
-                        let left = fenv.place_to_addr_mode(left, instrs, Proxy1)?;
-                        let (right_dreg, live) =
-                            fenv.place_to_dreg(right.clone(), instrs, env, Proxy2)?;
-                        if size_right == DataSize::Byte {
-                            let instr = Instruction::ExtW(right_dreg).validate()?;
+                        let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
+                        let (dest_dreg, live) =
+                            fenv.place_to_dreg(dest.clone(), instrs, env, Proxy2)?;
+                        if size_dest == DataSize::Byte {
+                            let instr = ExtW(dest_dreg).validate()?;
                             instrs.push(instr);
                         }
-                        if size_right == DataSize::Byte || size_right == DataSize::Word {
-                            let instr = Instruction::ExtL(right_dreg).validate()?;
+                        if size_dest == DataSize::Byte || size_dest == DataSize::Word {
+                            let instr = Instruction::ExtL(dest_dreg).validate()?;
                             instrs.push(instr);
                         }
-                        let instr = Instruction::Divs(left, right_dreg).validate()?;
+                        let instr = Divs(src, dest_dreg).validate()?;
                         instrs.push(instr);
                         if !live {
-                            let right_real = fenv.place_to_addr_mode(right, instrs, Proxy1)?;
-                            let right_dead = AddrMode::D(right_dreg);
+                            let dest_real = fenv.place_to_addr_mode(dest, instrs, Proxy1)?;
+                            let dest_dead = AddrMode::D(dest_dreg);
                             // The top word in this dreg is the remainder. I guess we just lose it...
                             let size = DataSize::Word;
-                            let instr = Move(size, right_dead, right_real).validate()?;
+                            let instr = Move(size, dest_dead, dest_real).validate()?;
                             instrs.push(instr);
                         }
                         Ok(())
                     }
-                    BudBinop::And => todo!(),
+                    BudBinop::And => {
+                        let f_lbl = fenv.get_new_label();
+                        let e_lbl = fenv.get_new_label();
+                        let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
+                        let dest = fenv.place_to_addr_mode(dest, instrs, Proxy2)?;
+                        let mut instr = vec![
+                            Tst(size_dest, dest.clone()).validate()?,
+                            Beq(f_lbl).validate()?,
+                            Tst(size_src, src).validate()?,
+                            Beq(f_lbl).validate()?,
+                            Move(size_dest, AddrMode::ImmL(NumOrLbl::Num(1)), dest.clone()).validate()?,
+                            Bra(e_lbl).validate()?,
+                            Lbl(f_lbl).validate()?,
+                            Move(size_dest, AddrMode::ImmL(NumOrLbl::Num(0)), dest).validate()?,
+                            Lbl(e_lbl).validate()?,
+                        ];
+                        instrs.append(&mut instr);
+                        Ok(())
+                    },
                     BudBinop::Or => todo!(),
                     BudBinop::BitAnd => todo!(),
                     BudBinop::BitOr => todo!(),
@@ -948,12 +941,32 @@ pub enum Instruction<State = Unchecked> {
     Roxl(DataSize, Option<AddrMode>, AddrMode),
     Roxr(DataSize, Option<AddrMode>, AddrMode),
     Swap(DReg),
+
+    // Control
     Stop,
     Nop,
     Reset,
     Jsr(String),
     Rte,
     Rts,
+    Lbl(usize),
+    // General
+    Bra(usize),
+    Beq(usize),
+    Bne(usize),
+    // Signed
+    Bge(usize),    // greater or equal
+    Bgt(usize),    // greater than
+    Ble(usize),    // less or equal
+    Blt(usize),    // less than
+    Bmi(usize),    // minus
+    Bpl(usize),    // plus
+    // Unsigned
+    Bhi(usize),    // higher
+    Bhs(usize),    // higher or same
+    Bls(usize),    // lower or same
+    Blo(usize),    // lower
+
     Trap(u32),
     Trapv(u32),
     Link(i16, AReg),
@@ -1240,54 +1253,82 @@ impl Instruction<Unchecked> {
             Link(_, _) |
             Unlk(_) |
             ExtW(_) |
-            ExtL(_) 
-             => Ok(self.validate_unchecked()),
+            ExtL(_) |
+            Lbl(_) |
+            Bra(_) |
+            Beq(_) |
+            Bne(_) |
+            Bge(_) |
+            Bgt(_) |
+            Ble(_) |
+            Blt(_) |
+            Bmi(_) |
+            Bpl(_) |
+            Bhi(_) |
+            Bhs(_) |
+            Bls(_) |
+            Blo(_) 
+            => Ok(self.validate_unchecked()),
 
             _State(_) => panic!("{:?} not to be used", self),
         }
     }
     fn validate_unchecked(self) -> Instruction<Valid> {
         match self {
-            Move(size, src, dest) => Instruction::Move(size, src, dest),
-            MoveMRtoM(size, regs, ea) => Instruction::MoveMRtoM(size, regs, ea),
-            MoveMMtoR(size, ea, regs) => Instruction::MoveMMtoR(size, ea, regs),
-            Add(size, src, dest) => Instruction::Add(size, src, dest),
-            Sub(size, src, dest) => Instruction::Sub(size, src, dest),
-            Neg(size, dest) => Instruction::Neg(size, dest),
-            Clr(size, dest) => Instruction::Clr(size, dest),
-            Not(size, dest) => Instruction::Not(size, dest),
-            Tst(size, dest) => Instruction::Tst(size, dest),
-            Cmp(size, src, dest) => Instruction::Cmp(size, src, dest),
-            Eor(size, src, dest) => Instruction::Eor(size, src, dest),
-            And(size, src, dest) => Instruction::And(size, src, dest),
-            Or(size, src, dest) => Instruction::Or(size, src, dest),
-            Divs(src, dest) => Instruction::Divs(src, dest),
-            Divu(src, dest) => Instruction::Divu(src, dest),
-            Muls(src, dest) => Instruction::Muls(src, dest),
-            Mulu(src, dest) => Instruction::Mulu(src, dest),
-            Asl(size, src, dest) => Instruction::Asl(size, src, dest),
-            Asr(size, src, dest) => Instruction::Asr(size, src, dest),
-            Lsl(size, src, dest) => Instruction::Lsl(size, src, dest),
-            Lsr(size, src, dest) => Instruction::Lsr(size, src, dest),
-            Rol(size, src, dest) => Instruction::Rol(size, src, dest),
-            Ror(size, src, dest) => Instruction::Ror(size, src, dest),
-            Roxl(size, src, dest) => Instruction::Roxl(size, src, dest),
-            Roxr(size, src, dest) => Instruction::Roxr(size, src, dest),
-            Swap(dest) => Instruction::Swap(dest),
-            Stop => Instruction::Stop,
-            Nop => Instruction::Nop,
-            Reset => Instruction::Reset,
-            Jsr(lbl) => Instruction::Jsr(lbl),
-            Rte => Instruction::Rte,
-            Rts => Instruction::Rts,
-            Trap(trap) => Instruction::Trap(trap),
-            Trapv(trap) => Instruction::Trapv(trap),
-            Link(num, areg) => Instruction::Link(num, areg),
-            Unlk(areg) => Instruction::Unlk(areg),
-            ExtW(dreg) => Instruction::ExtW(dreg),
-            ExtL(dreg) => Instruction::ExtL(dreg),
-            Pea(ea) => Instruction::Pea(ea),
-            Lea(ea, areg) => Instruction::Lea(ea, areg),
+            Move(size, src, dest) => Move(size, src, dest),
+            MoveMRtoM(size, regs, ea) => MoveMRtoM(size, regs, ea),
+            MoveMMtoR(size, ea, regs) => MoveMMtoR(size, ea, regs),
+            Add(size, src, dest) => Add(size, src, dest),
+            Sub(size, src, dest) => Sub(size, src, dest),
+            Neg(size, dest) => Neg(size, dest),
+            Clr(size, dest) => Clr(size, dest),
+            Not(size, dest) => Not(size, dest),
+            Tst(size, dest) => Tst(size, dest),
+            Cmp(size, src, dest) => Cmp(size, src, dest),
+            Eor(size, src, dest) => Eor(size, src, dest),
+            And(size, src, dest) => And(size, src, dest),
+            Or(size, src, dest) => Or(size, src, dest),
+            Divs(src, dest) => Divs(src, dest),
+            Divu(src, dest) => Divu(src, dest),
+            Muls(src, dest) => Muls(src, dest),
+            Mulu(src, dest) => Mulu(src, dest),
+            Asl(size, src, dest) => Asl(size, src, dest),
+            Asr(size, src, dest) => Asr(size, src, dest),
+            Lsl(size, src, dest) => Lsl(size, src, dest),
+            Lsr(size, src, dest) => Lsr(size, src, dest),
+            Rol(size, src, dest) => Rol(size, src, dest),
+            Ror(size, src, dest) => Ror(size, src, dest),
+            Roxl(size, src, dest) => Roxl(size, src, dest),
+            Roxr(size, src, dest) => Roxr(size, src, dest),
+            Swap(dest) => Swap(dest),
+            Stop => Stop,
+            Nop => Nop,
+            Reset => Reset,
+            Jsr(lbl) => Jsr(lbl),
+            Rte => Rte,
+            Rts => Rts,
+            Trap(trap) => Trap(trap),
+            Trapv(trap) => Trapv(trap),
+            Link(num, areg) => Link(num, areg),
+            Unlk(areg) => Unlk(areg),
+            ExtW(dreg) => ExtW(dreg),
+            ExtL(dreg) => ExtL(dreg),
+            Pea(ea) => Pea(ea),
+            Lea(ea, areg) => Lea(ea, areg),
+            Lbl(lbl) => Lbl(lbl),
+            Bra(lbl) => Bra(lbl),
+            Beq(lbl) => Beq(lbl),
+            Bne(lbl) => Bne(lbl),
+            Bge(lbl) => Bge(lbl),
+            Bgt(lbl) => Bgt(lbl),
+            Ble(lbl) => Ble(lbl),
+            Blt(lbl) => Blt(lbl),
+            Bmi(lbl) => Bmi(lbl),
+            Bpl(lbl) => Bpl(lbl),
+            Bhi(lbl) => Bhi(lbl),
+            Bhs(lbl) => Bhs(lbl),
+            Bls(lbl) => Bls(lbl),
+            Blo(lbl) => Blo(lbl),
             _State(_) => panic!(),
         }
     }
