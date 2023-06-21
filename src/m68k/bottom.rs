@@ -967,8 +967,8 @@ pub enum Instruction<State = Unchecked> {
     _State(State),
 }
 impl Instruction<Unchecked> {
-    pub fn validate(self) -> Result<Instruction<Valid>, String> {
-        match &self {
+    pub fn validate(mut self) -> Result<Instruction<Valid>, String> {
+        match &mut self {
             Move(_, _src, dest) => {
                 match &dest {
                     AddrMode::D(_) => {}
@@ -1093,7 +1093,6 @@ impl Instruction<Unchecked> {
                 }
                 Ok(self.validate_unchecked())
             }
-            Cmp(_, _, _) => Ok(self.validate_unchecked()),
             And(_, src, dest) | Or(_, src, dest) => {
                 let mut one_data = false;
                 match src {
@@ -1154,29 +1153,96 @@ impl Instruction<Unchecked> {
                 }
                 Ok(self.validate_unchecked())
             }
-            Asl(_, _, _) => todo!(),
-            Asr(_, _, _) => todo!(),
-            Lsl(_, _, _) => todo!(),
-            Lsr(_, _, _) => todo!(),
-            Rol(_, _, _) => todo!(),
-            Ror(_, _, _) => todo!(),
-            Roxl(_, _, _) => todo!(),
-            Roxr(_, _, _) => todo!(),
-            Swap(_) => todo!(),
-            Stop => todo!(),
-            Nop => todo!(),
-            Reset => todo!(),
-            Jsr(_) => todo!(),
-            Rte => todo!(),
-            Rts => todo!(),
-            Trap(_) => todo!(),
-            Trapv(_) => todo!(),
-            Link(_, _) => todo!(),
-            Unlk(_) => todo!(),
-            ExtW(_) => todo!(),
-            ExtL(_) => todo!(),
-            Pea(_) => todo!(),
-            Lea(_, _) => todo!(),
+            Asl(_, src, dest) |
+            Asr(_, src, dest) |
+            Lsl(_, src, dest) |
+            Lsr(_, src, dest) |
+            Rol(_, src, dest) |
+            Ror(_, src, dest) |
+            Roxl(_, src, dest) |
+            Roxr(_, src, dest) => {
+                let new_src;
+                match src {
+                    Some(src) => {
+                        match src {
+                            AddrMode::D(_) => new_src = Some(src.to_owned()),
+                            AddrMode::ImmW(w) => {
+                                if *w < 1 {
+                                    new_src = None;
+                                } else if *w > 8 {
+                                    return Err(format!("Shifting and rotating literals can only be [1,8]: {:?}", self));
+                                } else {
+                                    new_src = Some(src.to_owned())
+                                }
+                            },
+                            AddrMode::ImmL(_l) => {
+                                new_src = Some(src.to_owned());
+                            },
+                            _ => {
+                                return Err(format!("Illegal addressing mode: {:?}", self));
+                            }
+                        }
+                        if !matches!(dest, AddrMode::D(_)) {
+                            return Err(format!("Illegal addressing mode: {:?}", self));
+                        }
+                    }
+                    None => {
+                        new_src = None;
+                        match dest {
+                            AddrMode::D(_) => {},
+                            AddrMode::AInd(_) => {},
+                            AddrMode::AIndInc(_) => {},
+                            AddrMode::AIndDec(_) => {},
+                            AddrMode::AIndDisp(_, _) => {},
+                            AddrMode::AIndIdxDisp(_, _, _) => {},
+                            AddrMode::AbsW(_) => {},
+                            AddrMode::AbsL(_) => {},
+                            _ => {
+                                return Err(format!("Illegal addressing mode: {:?}", self));
+                            }
+                        }
+                    },
+                }
+                *src = new_src;
+                Ok(self.validate_unchecked())
+            }
+            Trap(trap) | Trapv(trap) => {
+                if *trap >= 16 {
+                    return Err(format!("Illegal trap vector: {:?}", self));
+                }
+                Ok(self.validate_unchecked())
+            },
+            Pea(src) |
+            Lea(src, _) => {
+                match src {
+                    AddrMode::AInd(_) => {}
+                    AddrMode::AIndDisp(_, _) => {}
+                    AddrMode::AIndIdxDisp(_, _, _) => {}
+                    AddrMode::AbsW(_) => {}
+                    AddrMode::AbsL(_) => {}
+                    AddrMode::PCIndDisp(_) => {}
+                    AddrMode::PCIndIdxDisp(_, _) => {}
+                    _ => {
+                        return Err(format!("Illegal addressing mode: {:?}", self));
+                    }
+                }
+                Ok(self.validate_unchecked())
+            },
+
+            Cmp(_, _, _) |
+            Swap(_) |
+            Stop |
+            Reset |
+            Nop |
+            Jsr(_) |
+            Rte |
+            Rts |
+            Link(_, _) |
+            Unlk(_) |
+            ExtW(_) |
+            ExtL(_) 
+             => Ok(self.validate_unchecked()),
+
             _State(_) => panic!("{:?} not to be used", self),
         }
     }
