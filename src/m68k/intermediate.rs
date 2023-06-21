@@ -674,10 +674,7 @@ pub struct FunctionInterEnvironment {
 impl FunctionInterEnvironment {
     pub fn new(sig: Signature) -> FunctionInterEnvironment {
         FunctionInterEnvironment {
-            vars: sig.args
-                .iter()
-                .map(|f| f.clone())
-                .collect(),
+            vars: sig.args.clone(),
             sig,
             lit_strings: Vec::new(),
             cleanup_label: None,
@@ -744,16 +741,10 @@ impl FunctionInterEnvironment {
     }
     pub fn get_break_label(&self) -> Option<usize> {
         // Maybe someday, you could break 2 layers out using `break 2;`
-        match self.loop_stack.last() {
-            Some(loop_environment) => Some(loop_environment.break_label),
-            None => None,
-        }
+        self.loop_stack.last().map(|loop_environment| loop_environment.break_label)
     }
     pub fn get_continue_label(&self) -> Option<usize> {
-        match self.loop_stack.last() {
-            Some(loop_environment) => Some(loop_environment.continue_label),
-            None => None,
-        }
+        self.loop_stack.last().map(|loop_environment| loop_environment.continue_label)
     }
     pub fn pop_loop_stack(&mut self) -> Option<LoopEnvironment>{
         self.loop_stack.pop()
@@ -772,11 +763,7 @@ impl FunctionInterEnvironment {
         None
     }
     pub fn has_var(&self, name: &String) -> bool {
-        if let Some(_) = self.get_var(name) {
-            true
-        } else {
-            false
-        }
+        matches!(self.get_var(name), Some(_))
     }
     pub fn add_var(&mut self, field: &Field) -> Result<(), String> {
         if let Some(existing_field) = self.get_var(&field.name) {
@@ -835,7 +822,7 @@ impl FunctionInterEnvironment {
         Ok(())
     }
     pub fn retva(&mut self, name: &String, instrs: &mut Vec<InterInstr>, env: &Environment) -> Result<(), String> {
-        let var = match self.get_var(&name) {
+        let var = match self.get_var(name) {
             Some(name) => name,
             None => {
                 return Err(format!("Trying to return pointer to local variable {} which does not exist", name));
@@ -1143,7 +1130,7 @@ impl Function {
                         ReturnPlan::Move(to) => {
                             let instr = InterInstr::MoVA(field.name, to);
                             instrs.push(instr);
-                            return Ok(());
+                            Ok(())
                         }
                         ReturnPlan::Condition => {
                             let atemp = fienv.get_addr_temp()?;
@@ -1159,16 +1146,16 @@ impl Function {
                             }
                             let instr = InterInstr::PuVA(field.name);
                             instrs.push(instr);
-                            return Ok(());
+                            Ok(())
                         }
                         ReturnPlan::Return => {
                             fienv.retva(&field.name, instrs, env)?;
                             warn!("Returning reference to local variable `{}` from function", field.name);
-                            return Ok(());
+                            Ok(())
                         }
                         ReturnPlan::None => {
                             // No return plan
-                            return Ok(());
+                            Ok(())
                         }
                     }
                 }
@@ -1191,7 +1178,7 @@ impl Function {
                                     instrs.push(instr);
                                     fienv.free_addr_temp(a);
                                     if let Some(d) = d { fienv.free_data_temp(d); }
-                                    return Ok(());
+                                    Ok(())
                                 }
                                 Place::DTemp(_, to_tt) => {
                                     // Move from Ref to ATemp to DTemp
@@ -1206,15 +1193,15 @@ impl Function {
                                             instrs.push(instr);
                                             fienv.free_addr_temp(a);
                                             if let Some(d) = d { fienv.free_data_temp(d); }
-                                            return Ok(())
+                                            Ok(())
                                         } else {
-                                            return Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt));
+                                            Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt))
                                         }
                                     } else {
-                                        return Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                        Err(format!("Trying to move pointer {} to DTemp of type {}",
                                             Place::Ref(a, d, off, tt),
                                             to_tt
-                                        ));
+                                        ))
                                     }
                                 }
                                 Place::Var(field) => {
@@ -1228,15 +1215,15 @@ impl Function {
                                             instrs.push(instr);
                                             fienv.free_addr_temp(a);
                                             if let Some(d) = d { fienv.free_data_temp(d); }
-                                            return Ok(())
+                                            Ok(())
                                         } else {
-                                            return Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt));
+                                            Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt))
                                         }
                                     } else {
-                                        return Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                        Err(format!("Trying to move pointer {} to DTemp of type {}",
                                             Place::Ref(a, d, off, tt),
                                             field.tt
-                                        ));
+                                        ))
                                     }
                                 }
                                 Place::Ref(_, _, _, to_tt) => {
@@ -1252,15 +1239,15 @@ impl Function {
                                             instrs.push(instr);
                                             fienv.free_addr_temp(a);
                                             if let Some(d) = d { fienv.free_data_temp(d); }
-                                            return Ok(())
+                                            Ok(())
                                         } else {
-                                            return Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt));
+                                            Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt))
                                         }
                                     } else {
-                                        return Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                        Err(format!("Trying to move pointer {} to DTemp of type {}",
                                             Place::Ref(a, d, off, tt),
                                             to_tt
-                                        ));
+                                        ))
                                     }
                                 }
                             }
@@ -1273,7 +1260,7 @@ impl Function {
                             fienv.free_addr_temp(atemp);
                             fienv.free_addr_temp(a);
                             if let Some(d) = d { fienv.free_data_temp(d); }
-                            return Ok(());
+                            Ok(())
                             
                         }
                         ReturnPlan::Push(to_tt) => {
@@ -1283,15 +1270,15 @@ impl Function {
                                     instrs.push(instr);
                                     fienv.free_addr_temp(a);
                                     if let Some(d) = d { fienv.free_data_temp(d); }
-                                    return Ok(())
+                                    Ok(())
                                 } else {
-                                    return Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt));
+                                    Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt))
                                 }
                             } else {
-                                return Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                Err(format!("Trying to move pointer {} to DTemp of type {}",
                                     Place::Ref(a, d, off, tt),
                                     to_tt
-                                ));
+                                ))
                             }
                         }
                         ReturnPlan::Return => {
@@ -1303,7 +1290,7 @@ impl Function {
                             let a_place = Place::ATemp(a);
                             fienv.ret(a_place, instrs, env)?;
                             if let Some(d) = d { fienv.free_data_temp(d); }
-                            return Ok(())
+                            Ok(())
                         }
                         ReturnPlan::None => {
                             fienv.free_addr_temp(a);
@@ -1354,7 +1341,7 @@ impl Function {
                 // Store the result of `nbe` into a dtemp, do the unop, and then move the dtemp as the plan dictates
                 let tt = tt.unwrap();   // if plan is not None, then tt is not None
                 let dtemp = fienv.get_data_temp(tt.clone())?;
-                let d_place = Place::DTemp(dtemp, tt.clone());
+                let d_place = Place::DTemp(dtemp, tt);
                 let instr = match un {
                     BudUnop::Neg => InterInstr::Neg(d_place.clone()),
                     BudUnop::Not => InterInstr::Bnot(d_place.clone()),
@@ -1373,7 +1360,7 @@ impl Function {
         // because we don't care about the actual value, only the condition codes
         // Maybe CC should be a ReturnPlan??
         let dtemp = fienv.get_data_temp(tt.clone())?;
-        let d_place = Place::DTemp(dtemp, tt.clone());
+        let d_place = Place::DTemp(dtemp, tt);
         let plan = ReturnPlan::Move(d_place.clone());
         Self::compile_expr(cond, plan, instrs, label_gen, fienv, env)?;
         // Condition codes should be set accordingly. I hope they are.
@@ -1619,10 +1606,10 @@ impl Function {
                 let instr = InterInstr::Call(id.clone(), marker);
                 instrs.push(instr);
                 let place = env.ret_place(id)?;
-                return Ok(place);
+                Ok(place)
             }
             None => {
-                return Err(format!("Undeclared variable {}", id));
+                Err(format!("Undeclared variable {}", id))
             }
         }
     }
@@ -1679,8 +1666,8 @@ impl Function {
                                 None => {
                                     let tt = TypeType::Id("i32".to_owned());
                                     let off_temp = fienv.get_data_temp(tt.clone())?;   // offset as an index (not multiplied by sizeof(T))
-                                    let off_place = Place::DTemp(off_temp, tt.clone());
-                                    let plan = ReturnPlan::Move(off_place.clone());
+                                    let off_place = Place::DTemp(off_temp, tt);
+                                    let plan = ReturnPlan::Move(off_place);
                                     Self::compile_expr(*offset, plan, instrs, label_gen, fienv, env)?;
                                     let place = id_place.index_into(Some(off_temp), 0, false, instrs, fienv, env)?;
                                     return Ok(place);
@@ -1748,8 +1735,8 @@ impl Function {
                                 None => {
                                     let tt = TypeType::Id("i32".to_owned());
                                     let off_temp = fienv.get_data_temp(tt.clone())?;   // offset as an index (not multiplied by sizeof(T))
-                                    let off_place = Place::DTemp(off_temp, tt.clone());
-                                    let plan = ReturnPlan::Move(off_place.clone());
+                                    let off_place = Place::DTemp(off_temp, tt);
+                                    let plan = ReturnPlan::Move(off_place);
                                     Self::compile_expr(offset, plan, instrs, label_gen, fienv, env)?;
                                     let place = id_place.index_into(Some(off_temp), 0, true, instrs, fienv, env)?;
                                     return Ok(place);
@@ -1836,9 +1823,9 @@ impl Imm {
 impl std::fmt::Display for Imm {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Imm::Byte(v) => write!(f, "{}.b", v.to_string()),
-            Imm::Word(v) => write!(f, "{}.w", v.to_string()),
-            Imm::LWord(v) => write!(f, "{}.l", v.to_string()),
+            Imm::Byte(v) => write!(f, "{}.b", v),
+            Imm::Word(v) => write!(f, "{}.w", v),
+            Imm::LWord(v) => write!(f, "{}.l", v),
         }
     }
 }

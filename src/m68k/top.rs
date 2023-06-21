@@ -114,8 +114,8 @@ impl BudExpander {
             NonBinExpr::IdExpr(_) => Ok(()),
             NonBinExpr::LitExpr(lit) => {
                 match lit {
-                    bud::Literal::Num(_) => { TypeType::Id("i32".to_owned()); },
-                    bud::Literal::Str(_) => { TypeType::Pointer(Box::new(TypeType::Id("u8".to_owned()))); },
+                    bud::Literal::Num(_) => { TypeType::Id("i32".to_owned()).add_subtypes(types); },
+                    bud::Literal::Str(_) => { TypeType::Pointer(Box::new(TypeType::Id("u8".to_owned()))).add_subtypes(types); },
                 }
                 Ok(())
             }
@@ -307,14 +307,14 @@ impl TypeSizeGenerator {
             Some(generator) => {
                 match &mut generator.typtyp {
                     TypeType::Pointer(subtyp) => {
-                        let subtyp_clone = (&**subtyp).clone();
+                        let subtyp_clone = (**subtyp).clone();
                         Self::get_size(size_generators, subtyp_clone, top)?;
                         size_generators.get_mut(&index).unwrap().state =
                             TypeSizeState::Calculated(Either::This(BudExpander::REG_SIZE));
                         Ok(Either::This(BudExpander::REG_SIZE))
                     }
                     TypeType::Array(subtyp, len) => {
-                        let subtyp_clone = (&**subtyp).clone();
+                        let subtyp_clone = (**subtyp).clone();
                         let len = *len;
                         let (Either::This(subsize) | Either::That((subsize, _))) = Self::get_size(size_generators, subtyp_clone, top)?;
                         size_generators.get_mut(&index).unwrap().state =
@@ -329,9 +329,7 @@ impl TypeSizeGenerator {
                         let fields = fields.clone();
                         let sizes = fields
                             .iter()
-                            .map(|field| field.clone())
-                            .collect::<Vec<Field>>()
-                            .into_iter()
+                            .cloned()
                             .map(|field| {
                                 size_generators.get_mut(&index).unwrap().state =
                                     TypeSizeState::BeingCalculated;                                         // This line is really
@@ -431,9 +429,7 @@ impl Environment {
             .iter()
             .map(|tt| (tt.clone(), TypeSizeGenerator::new(tt.clone())))
             .chain(
-                built_in
-                    .iter()
-                    .map(|(_, typ)| (typ.typtyp.clone(), TypeSizeGenerator::from_type(&typ))),
+                built_in.values().map(|typ| (typ.typtyp.clone(), TypeSizeGenerator::from_type(typ))),
             )
             .chain(
                 types_in_functions
@@ -446,7 +442,7 @@ impl Environment {
             debug!("Size generators: {}", crate::tools::to_string(&size_generators));
         }
         
-        for tt in size_generators.keys().map(|tt| tt.clone()).collect::<Vec<TypeType>>() {
+        for tt in size_generators.keys().cloned().collect::<Vec<TypeType>>() {
             TypeSizeGenerator::get_size(&mut size_generators, tt.clone(), tt)?;
         }
         if log_options.print_types_trace {
@@ -486,7 +482,7 @@ impl Environment {
             .collect::<Result<HashMap<TypeType, Type>, String>>()?;
         
         let mut structs = HashMap::new();
-        for (tt, _) in &types {
+        for tt in types.keys() {
             if let TypeType::Struct(name, _) = tt {
                 structs.insert(name.to_owned(), tt.to_owned());
             }
@@ -497,7 +493,7 @@ impl Environment {
             .map(|(name, args, expr)| {
                 Ok((
                     name.id.to_owned(),
-                    Function::new(name, args, expr, &env)?
+                    Function::new(name, args, *expr, &env)?
                 ))
             })
             .collect::<Result<Vec<(String, Function)>, String>>()?;
@@ -513,11 +509,11 @@ impl Environment {
 
     // Get the positon of each element in a struct and the size of the struct
     // Given the sizes of each element in the struct
-    pub fn get_struct_layout_from_sizes(sizes: &Vec<u32>) -> (Vec<u32>, u32) {
-        let mut layout = sizes.clone();
+    pub fn get_struct_layout_from_sizes(sizes: &[u32]) -> (Vec<u32>, u32) {
+        let mut layout = Vec::new();
         let mut position = 0;
-        for (i, size) in sizes.iter().enumerate() {
-            layout[i] = position;
+        for size in sizes {
+            layout.push(position);
             position += size;
             if position % 2 != 0 {
                 position += 1;
@@ -693,7 +689,7 @@ pub struct Function {
     pub expr: Expr,
 }
 impl Function {
-    pub fn new(name: VarDecl, args: Vec<VarDecl>, expr: Box<Expr>, environment: &Environment) -> Result<Function, String> {
+    pub fn new(name: VarDecl, args: Vec<VarDecl>, expr: Expr, environment: &Environment) -> Result<Function, String> {
         let name = Field::new(name, environment);
         let args = args
             .into_iter()
@@ -703,7 +699,7 @@ impl Function {
             .collect();
         Ok(Function {
             signature: Signature { name, args },
-            expr: *expr,
+            expr,
         })
     }
     pub fn compile(self, log_options: &LoggingOptions, mut label_gen: RangeFrom<usize>, env: &Environment) -> Result<CompiledFunction, String> {
