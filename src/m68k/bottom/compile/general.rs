@@ -192,11 +192,11 @@ pub fn extend(
 /// The returned bool indicates if the AddrMode is live. If no extension occurs, then it will
 /// always be live.
 ///
-/// If `from >= to`, then no extension needs to occur, so place is just converted to AddrMode.
+/// If `from >= to`, then no extension needs to occur, so addr_mode is returned.
 ///
-/// Otherwise, the place is converted to DReg.
+/// Otherwise, the place is converted to DReg using the given proxy.
 pub fn extend_efficient(
-    place: Place,
+    addr_mode: AddrMode,
     from: DataSize,
     to: DataSize,
     instrs: &mut Vec<Instruction<Valid>>,
@@ -205,9 +205,9 @@ pub fn extend_efficient(
     n: Proxy,
 ) -> Result<(AddrMode, bool), String> {
     if from >= to {
-        Ok((fenv.place_to_addr_mode(place, instrs, n)?, true))
+        Ok((addr_mode, true))
     } else {
-        let (dreg, live) = fenv.place_to_dreg(place, instrs, env, n)?;
+        let (dreg, live) = fenv.addr_mode_to_dreg(addr_mode, from, instrs, n)?;
         extend(dreg, from, to, instrs)?;
         Ok((AddrMode::D(dreg), live))
     }

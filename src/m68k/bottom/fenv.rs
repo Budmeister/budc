@@ -133,10 +133,9 @@ impl FunctionEnvironment {
     /// Returns an addressing mode that points to the given place.
     ///
     /// The returned AddrMode is always live, but it may use a proxy if the
-    /// given Place is Ref
-    ///
-    /// n is a `bool` that tells whether to use `ADDR_PROXY1` and `DATA_PROXY1`
-    /// or `ADDR_PROXY2` and `DATA_PROXY2` if place is Ref.
+    /// given Place is Ref.
+    /// 
+    /// If the given Place is not Ref, then the proxy will not be used.
     pub fn place_to_addr_mode(
         &self,
         place: Place,
@@ -244,6 +243,25 @@ impl FunctionEnvironment {
                 self.dtemp_as_dreg(dtemp, instrs, n)
             }
             Place::Ref(_, _, _, _) => todo!(),
+        }
+    }
+    /// If the given AddrMode is DReg, returns the DReg. Otherwise, moves the value into
+    /// the given Proxy and returns that Proxy.
+    pub fn addr_mode_to_dreg(
+        &self,
+        addr_mode: AddrMode,
+        size: DataSize,
+        instrs: &mut Vec<Instruction<Valid>>,
+        n: Proxy
+    ) -> Result<Proxied, String> {
+        if let AddrMode::D(dreg) = addr_mode {
+            Ok((dreg, true))
+        } else {
+            let proxy = n.into();
+            let to = AddrMode::D(proxy);
+            let instr = Instruction::Move(size, addr_mode, to).validate()?;
+            instrs.push(instr);
+            Ok((proxy, true))
         }
     }
     fn atemp_as_areg(
