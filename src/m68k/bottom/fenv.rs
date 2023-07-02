@@ -246,17 +246,6 @@ impl FunctionEnvironment {
             Place::Ref(_, _, _, _) => todo!(),
         }
     }
-    /// Chooses one of the given places to convert to a DReg. Returns both.
-    fn choose_one_to_dreg(
-        &self,
-        place1: Place,
-        place2: Place,
-        instrs: &mut Vec<Instruction<Valid>>,
-        env: &Environment,
-        n: Proxy,
-    ) -> Result<Either<(Proxied, Place), (Place, Proxied)>, String> {
-        todo!()
-    }
     fn atemp_as_areg(
         &self,
         atemp: ATemp,

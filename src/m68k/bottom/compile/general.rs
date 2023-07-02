@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 
-use crate::{bud::BudBinop, m68k::*};
+use crate::m68k::*;
 
-use super::{instruction::*, fenv::{FunctionEnvironment, Proxy}};
+use super::super::{instruction::*, fenv::{FunctionEnvironment, Proxy}};
 use Instruction::*;
 use DReg::*;
 use AReg::*;
-use Proxy::*;
 use log::*;
 
 impl Function {
@@ -176,7 +175,7 @@ impl Function {
 
         (dtemp_map, atemp_map)
     }
-    fn extend(
+    pub fn extend(
         dreg: DReg,
         from: DataSize,
         to: DataSize,
@@ -201,7 +200,7 @@ impl Function {
     /// If `from >= to`, then no extension needs to occur, so place is just converted to AddrMode.
     ///
     /// Otherwise, the place is converted to DReg.
-    fn extend_efficient(
+    pub fn extend_efficient(
         place: Place,
         from: DataSize,
         to: DataSize,
@@ -261,193 +260,6 @@ impl Function {
             InterInstr::Bne(_) => todo!(),
             InterInstr::Bpl(_) => todo!(),
             InterInstr::Bra(_) => todo!(),
-        }
-    }
-    fn compile_binop_iinstr(src: Place, b: BudBinop, dest: Place, instrs: &mut Vec<Instruction<Valid>>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), String> {
-        if src.is_array() || src.is_struct() || dest.is_array() || dest.is_struct() {
-            return Err(format!(
-                "Cannot do binop {} on types {} and {}",
-                b,
-                src.get_type(),
-                dest.get_type()
-            ));
-        }
-        let size_dest = dest.get_data_size(env).unwrap();
-        let size_src = src.get_data_size(env).unwrap();
-        match b {
-            BudBinop::Plus => {
-                // Plus doesn't necessarily need a dreg, but it does need to be extended
-                let (src, _) = Self::extend_efficient(
-                    src, size_src, size_dest, instrs, fenv, env, Proxy1,
-                )?;
-                let dest = fenv.place_to_addr_mode(dest, instrs, Proxy2)?;
-                let instr = Add(size_dest, src, dest).validate()?;
-                instrs.push(instr);
-                Ok(())
-            }
-            BudBinop::Minus | BudBinop::Equal => {
-                // Minus doesn't necessarily need a dreg, but it does need to be extended
-                let (src, _) = Self::extend_efficient(
-                    src, size_src, size_dest, instrs, fenv, env, Proxy1,
-                )?;
-                let dest = fenv.place_to_addr_mode(dest, instrs, Proxy2)?;
-                let instr = Sub(size_dest, src, dest).validate()?;
-                instrs.push(instr);
-                Ok(())
-            }
-            BudBinop::Times => {
-                if size_src == DataSize::LWord || size_dest == DataSize::LWord {
-                    warn!("Multiplication on 32 bit integers will cast to 16 bit integers")
-                }
-                let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
-                // Times needs to go to a dreg
-                let (dest_dreg, live) =
-                    fenv.place_to_dreg(dest.clone(), instrs, env, Proxy2)?;
-                let instr = Muls(src, dest_dreg).validate()?;
-                instrs.push(instr);
-                if !live {
-                    let dest_real = fenv.place_to_addr_mode(dest, instrs, Proxy1)?;
-                    let dest_dead = AddrMode::D(dest_dreg);
-                    let size = DataSize::Word;
-                    let instr = Move(size, dest_dead, dest_real).validate()?;
-                    instrs.push(instr);
-                }
-                Ok(())
-            }
-            BudBinop::Div => {
-                if size_src == DataSize::LWord {
-                    warn!("The dividend ")
-                }
-                // Assume divide signed
-                let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
-                // Div needs to go to a dreg
-                let (dest_dreg, live) =
-                    fenv.place_to_dreg(dest.clone(), instrs, env, Proxy2)?;
-                Self::extend(dest_dreg, size_dest, DataSize::LWord, instrs)?;
-                let instr = Divs(src, dest_dreg).validate()?;
-                instrs.push(instr);
-                if !live {
-                    let dest_real = fenv.place_to_addr_mode(dest, instrs, Proxy1)?;
-                    let dest_dead = AddrMode::D(dest_dreg);
-                    // The top word in this dreg is the remainder. I guess we just lose it...
-                    let size = DataSize::Word;
-                    let instr = Move(size, dest_dead, dest_real).validate()?;
-                    instrs.push(instr);
-                }
-                Ok(())
-            }
-            BudBinop::And => {
-                let f_lbl = fenv.get_new_label();
-                let e_lbl = fenv.get_new_label();
-                // We could optimize this by calling place_to_addr_mode for src after dest has been tested
-                let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
-                let dest = fenv.place_to_addr_mode(dest, instrs, Proxy2)?;
-                let mut instr = vec![
-                    Tst(size_dest, dest.clone()).validate()?,
-                    Beq(f_lbl).validate()?,
-                    Tst(size_src, src).validate()?,
-                    Beq(f_lbl).validate()?,
-                    Move(size_dest, AddrMode::ImmL(NumOrLbl::Num(1)), dest.clone())
-                        .validate()?,
-                    Bra(e_lbl).validate()?,
-                    Lbl(f_lbl).validate()?,
-                    Move(size_dest, AddrMode::ImmL(NumOrLbl::Num(0)), dest).validate()?,
-                    Lbl(e_lbl).validate()?,
-                ];
-                instrs.append(&mut instr);
-                Ok(())
-            }
-            BudBinop::Or => {
-                let t_lbl = fenv.get_new_label();
-                let e_lbl = fenv.get_new_label();
-                // We could optimize this by calling place_to_addr_mode for src after dest has been tested
-                let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
-                let dest = fenv.place_to_addr_mode(dest, instrs, Proxy2)?;
-                let mut instr = vec![
-                    Tst(size_dest, dest.clone()).validate()?,
-                    Bne(t_lbl).validate()?,
-                    Tst(size_src, src).validate()?,
-                    Bne(t_lbl).validate()?,
-                    Move(size_dest, AddrMode::ImmL(NumOrLbl::Num(0)), dest.clone())
-                        .validate()?,
-                    Bra(e_lbl).validate()?,
-                    Lbl(t_lbl).validate()?,
-                    Move(size_dest, AddrMode::ImmL(NumOrLbl::Num(1)), dest).validate()?,
-                ];
-                instrs.append(&mut instr);
-                Ok(())
-            }
-            BudBinop::BitAnd => {
-                let (src, _) = Self::extend_efficient(
-                    src, size_src, size_dest, instrs, fenv, env, Proxy1,
-                )?;
-                let (dest_dead, live) = Self::extend_efficient(
-                    dest.clone(),
-                    size_dest,
-                    size_src,
-                    instrs,
-                    fenv,
-                    env,
-                    Proxy2,
-                )?;
-                let instr = And(size_dest, src, dest_dead.clone()).validate()?;
-                instrs.push(instr);
-                if !live {
-                    let dest_real = fenv.place_to_addr_mode(dest, instrs, Proxy1)?;
-                    let instr = Move(size_dest, dest_dead, dest_real).validate()?;
-                    instrs.push(instr);
-                }
-                Ok(())
-            }
-            BudBinop::BitOr => {
-                let (src, _) = Self::extend_efficient(
-                    src, size_src, size_dest, instrs, fenv, env, Proxy1,
-                )?;
-                let (dest_dead, live) = Self::extend_efficient(
-                    dest.clone(),
-                    size_dest,
-                    size_src,
-                    instrs,
-                    fenv,
-                    env,
-                    Proxy2,
-                )?;
-                let instr = Or(size_dest, src, dest_dead.clone()).validate()?;
-                instrs.push(instr);
-                if !live {
-                    let dest_real = fenv.place_to_addr_mode(dest, instrs, Proxy1)?;
-                    let instr = Move(size_dest, dest_dead, dest_real).validate()?;
-                    instrs.push(instr);
-                }
-                Ok(())
-            }
-            BudBinop::BitXor => {
-                // Eor needs to come from a dreg
-                let (src_dreg, _) = fenv.place_to_dreg(src, instrs, env, Proxy1)?;
-                Self::extend(src_dreg, size_src, size_dest, instrs)?;
-                let (dest_dead, live) = Self::extend_efficient(
-                    dest.clone(),
-                    size_dest,
-                    size_src,
-                    instrs,
-                    fenv,
-                    env,
-                    Proxy2,
-                )?;
-                let instr = Eor(size_dest, src_dreg, dest_dead.clone()).validate()?;
-                instrs.push(instr);
-                if !live {
-                    let dest_real = fenv.place_to_addr_mode(dest, instrs, Proxy1)?;
-                    let instr = Move(size_dest, dest_dead, dest_real).validate()?;
-                    instrs.push(instr);
-                }
-                Ok(())
-            }
-            BudBinop::NotEq => todo!(),
-            BudBinop::Greater => todo!(),
-            BudBinop::GrtrEq => todo!(),
-            BudBinop::Less => todo!(),
-            BudBinop::LessEq => todo!(),
         }
     }
 }
