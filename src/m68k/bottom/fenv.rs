@@ -295,19 +295,25 @@ pub enum Proxy {
     Proxy1,
     Proxy2,
 }
+impl Proxy {
+    pub const DATA_PROXY1: DReg = DReg::D6;
+    pub const DATA_PROXY2: DReg = DReg::D7;
+    pub const ADDR_PROXY1: AReg = AReg::A5;
+    pub const ADDR_PROXY2: AReg = AReg::A6;
+}
 impl From<Proxy> for DReg {
     fn from(val: Proxy) -> Self {
         match val {
-            Proxy1 => Function::DATA_PROXY1,
-            Proxy2 => Function::DATA_PROXY2,
+            Proxy1 => Proxy::DATA_PROXY1,
+            Proxy2 => Proxy::DATA_PROXY2,
         }
     }
 }
 impl From<Proxy> for AReg {
     fn from(val: Proxy) -> Self {
         match val {
-            Proxy1 => Function::ADDR_PROXY1,
-            Proxy2 => Function::ADDR_PROXY2,
+            Proxy1 => Proxy::ADDR_PROXY1,
+            Proxy2 => Proxy::ADDR_PROXY2,
         }
     }
 }

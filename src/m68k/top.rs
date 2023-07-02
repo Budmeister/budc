@@ -10,6 +10,8 @@ use log::*;
 use crate::m68k::tools::*;
 use crate::m68k::bottom::*;
 
+use super::get_inter_instrs;
+
 pub struct BudExpander {}
 impl BudExpander {
     pub const BUILT_IN_TYPES: [&str; 3] = ["i8", "i16", "i32"];
@@ -703,8 +705,8 @@ impl Function {
         })
     }
     pub fn compile(self, log_options: &LoggingOptions, env: &Environment) -> Result<CompiledFunction, String> {
-        let (instrs, fienv) = Self::get_inter_instrs(self.expr, &self.signature, log_options, env)?;
-        let instrs = Self::get_instrs(instrs, fienv, env)?;
+        let (instrs, fienv) = get_inter_instrs(self.expr, &self.signature, log_options, env)?;
+        let instrs = get_instrs(instrs, fienv, env)?;
         let cfunc = CompiledFunction{ signature: self.signature, instructions: instrs };
         Ok(cfunc)
     }
