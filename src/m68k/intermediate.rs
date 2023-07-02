@@ -1781,7 +1781,7 @@ impl Function {
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialOrd, Ord, PartialEq, Hash, Debug)]
 pub enum DataSize {
     Byte,
     Word,
