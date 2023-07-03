@@ -70,7 +70,7 @@ impl std::fmt::Display for DataSize {
 
 pub type Imm = i32;
 
-pub fn imm_to_dreg(imm: Imm, instrs: &mut Vec<Instruction<Valid>>, n: Proxy) -> Result<DReg, String> {
+pub fn imm_to_dreg(imm: Imm, instrs: &mut Vec<ValidInstruction>, n: Proxy) -> Result<DReg, String> {
     let dreg: DReg = n.into();
     let addr_mode: AddrMode = dreg.into();
     let size = DataSize::LWord;

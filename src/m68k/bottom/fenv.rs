@@ -139,7 +139,7 @@ impl FunctionEnvironment {
     pub fn place_to_addr_mode(
         &self,
         place: Place,
-        instrs: &mut Vec<Instruction<Valid>>,
+        instrs: &mut Vec<ValidInstruction>,
         n: Proxy,
     ) -> Result<AddrMode, String> {
         match place {
@@ -187,14 +187,14 @@ impl FunctionEnvironment {
                 None => Err(format!("Unrecognized variable {}", name)),
             },
             StackItem::DTemp(dtemp) => match self.dtemp_map.get(&dtemp) {
-                Some(Some(dreg)) => Ok(AddrMode::D(*dreg)),
+                Some(Some(dreg)) => Ok((*dreg).into()),
                 _ => match self.stack_frame.get(&stack_item) {
                     Some(stack_diff) => Ok(AddrMode::AIndDisp(NumOrLbl::Num(*stack_diff), SP)),
                     None => Err(format!("DTemp {} not in dtemp_map or stack_frame", dtemp)),
                 },
             },
             StackItem::ATemp(atemp) => match self.atemp_map.get(&atemp) {
-                Some(Some(areg)) => Ok(AddrMode::A(*areg)),
+                Some(Some(areg)) => Ok((*areg).into()),
                 _ => match self.stack_frame.get(&stack_item) {
                     Some(stack_diff) => Ok(AddrMode::AIndDisp(NumOrLbl::Num(*stack_diff), SP)),
                     None => Err(format!("ATemp {} not in atemp_map or stack_frame", atemp)),
@@ -219,7 +219,7 @@ impl FunctionEnvironment {
     pub fn place_to_dreg(
         &self,
         place: Place,
-        instrs: &mut Vec<Instruction<Valid>>,
+        instrs: &mut Vec<ValidInstruction>,
         env: &Environment,
         n: Proxy,
     ) -> Result<Proxied, String> {
@@ -235,7 +235,7 @@ impl FunctionEnvironment {
                 let size = name.tt.get_data_size(env).unwrap();
                 let from = self.stack_item_to_addr_mode(StackItem::Var(name.name))?;
                 let to = AddrMode::D(proxy);
-                let instr = Instruction::Move(size, from, to);
+                let instr = Instruction::Move(size, from, to).validate()?;
                 instrs.push(instr);
                 Ok((proxy, false))
             }
@@ -264,7 +264,7 @@ impl FunctionEnvironment {
         &self,
         addr_mode: AddrMode,
         size: DataSize,
-        instrs: &mut Vec<Instruction<Valid>>,
+        instrs: &mut Vec<ValidInstruction>,
         n: Proxy
     ) -> Result<Proxied, String> {
         if let AddrMode::D(dreg) = addr_mode {
@@ -280,7 +280,7 @@ impl FunctionEnvironment {
     fn atemp_as_areg(
         &self,
         atemp: ATemp,
-        instrs: &mut Vec<Instruction<Valid>>,
+        instrs: &mut Vec<ValidInstruction>,
         n: Proxy,
     ) -> Result<(AReg, bool), String> {
         match self.atemp_map.get(&atemp).unwrap() {
@@ -298,7 +298,7 @@ impl FunctionEnvironment {
     fn dtemp_as_dreg(
         &self,
         dtemp: DTemp,
-        instrs: &mut Vec<Instruction<Valid>>,
+        instrs: &mut Vec<ValidInstruction>,
         n: Proxy,
     ) -> Result<Proxied, String> {
         match self.dtemp_map.get(&dtemp).unwrap() {

@@ -152,10 +152,6 @@ pub enum AddrMode {
     AbsW(i16),
     /// Absolute long word
     AbsL(NumOrLbl),
-    /// PC indirect displacement
-    PCIndDisp(NumOrLbl),
-    /// PC indirect indexed displacement
-    PCIndIdxDisp(NumOrLbl, ADReg),
     /// Immediate long word
     Imm(NumOrLbl),
 }
@@ -182,8 +178,6 @@ impl std::fmt::Display for AddrMode {
             AddrMode::AIndIdxDisp(i, a, ad) => write!(f, "({}, {}, {})", i, a, ad),
             AddrMode::AbsW(abs) => write!(f, "{}", abs),
             AddrMode::AbsL(abs) => write!(f, "{}", abs),
-            AddrMode::PCIndDisp(i) => write!(f, "{}({})", i, GReg::PC),
-            AddrMode::PCIndIdxDisp(i, ad) => write!(f, "({}, {}, {})", i, GReg::PC, ad),
             AddrMode::Imm(imm) => write!(f, "#{}", imm),
         }
     }
@@ -293,8 +287,23 @@ pub struct Unchecked;
 
 use Instruction::*;
 
+#[derive(Clone, Eq, PartialEq, Hash)]
+pub struct ValidInstruction(Instruction);
+impl TryFrom<Instruction> for ValidInstruction {
+    type Error = String;
+
+    fn try_from(value: Instruction) -> Result<Self, Self::Error> {
+        value.validate()
+    }
+}
+impl std::fmt::Debug for ValidInstruction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub enum Instruction<State = Unchecked> {
+pub enum Instruction {
     // Data movement
     Move(DataSize, AddrMode, AddrMode),
     MoveMRtoM(DataSize, ADBitField, AddrMode),
@@ -362,12 +371,9 @@ pub enum Instruction<State = Unchecked> {
     ExtL(DReg),
     Pea(AddrMode),
     Lea(AddrMode, AReg),
-
-    // To use the type parameter
-    _State(State),
 }
-impl Instruction<Unchecked> {
-    pub fn validate(mut self) -> Result<Instruction<Valid>, String> {
+impl Instruction {
+    pub fn validate(mut self) -> Result<ValidInstruction, String> {
         match &mut self {
             Move(_, _src, dest) => {
                 match &dest {
@@ -387,7 +393,7 @@ impl Instruction<Unchecked> {
                         ));
                     }
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             MoveMRtoM(size, _regs, ea) | MoveMMtoR(size, ea, _regs) => {
                 if *size == DataSize::Byte {
@@ -400,16 +406,11 @@ impl Instruction<Unchecked> {
                     AddrMode::AIndIdxDisp(_, _, _) => {}
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
-                    AddrMode::PCIndDisp(_) | AddrMode::PCIndIdxDisp(_, _) => {
-                        if let MoveMMtoR(_, _, _) = &self {
-                            return Err(format!("Illegal addressing mode: {:?}", self));
-                        }
-                    }
                     _ => {
                         return Err(format!("Illegal addressing mode: {:?}", self));
                     }
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             Add(_, _, dest) | Sub(_, _, dest) | Eor(_, _, dest) => {
                 match dest {
@@ -425,7 +426,7 @@ impl Instruction<Unchecked> {
                         return Err(format!("Illegal addressing mode: {:?}", self));
                     }
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             Neg(_size, dest) => {
                 match dest {
@@ -441,7 +442,7 @@ impl Instruction<Unchecked> {
                         return Err(format!("Illegal addressing mode: {:?}", self));
                     }
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             Clr(_size, dest) => {
                 match dest {
@@ -457,7 +458,7 @@ impl Instruction<Unchecked> {
                         return Err(format!("Illegal addressing mode: {:?}", self));
                     }
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             Not(_size, dest) => {
                 match dest {
@@ -473,7 +474,7 @@ impl Instruction<Unchecked> {
                         return Err(format!("Illegal addressing mode: {:?}", self));
                     }
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             Tst(_size, dest) => {
                 match dest {
@@ -485,13 +486,11 @@ impl Instruction<Unchecked> {
                     AddrMode::AIndIdxDisp(_, _, _) => {}
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
-                    AddrMode::PCIndDisp(_) => {}
-                    AddrMode::PCIndIdxDisp(_, _) => {}
                     _ => {
                         return Err(format!("Illegal addressing mode: {:?}", self));
                     }
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             And(_, src, dest) | Or(_, src, dest) => {
                 let mut one_data = false;
@@ -504,8 +503,6 @@ impl Instruction<Unchecked> {
                     AddrMode::AIndIdxDisp(_, _, _) => {}
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
-                    AddrMode::PCIndDisp(_) => {}
-                    AddrMode::PCIndIdxDisp(_, _) => {}
                     AddrMode::Imm(_) => {}
                     _ => {
                         return Err(format!("Illegal addressing mode: {:?}", self));
@@ -530,7 +527,7 @@ impl Instruction<Unchecked> {
                         self
                     ));
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             Divs(src, _) | Divu(src, _) | Muls(src, _) | Mulu(src, _) => {
                 match src {
@@ -542,14 +539,12 @@ impl Instruction<Unchecked> {
                     AddrMode::AIndIdxDisp(_, _, _) => {}
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
-                    AddrMode::PCIndDisp(_) => {}
-                    AddrMode::PCIndIdxDisp(_, _) => {}
                     AddrMode::Imm(_) => {}
                     _ => {
                         return Err(format!("Illegal addressing mode: {:?}", self));
                     }
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             Asl(_, src, dest)
             | Asr(_, src, dest)
@@ -606,13 +601,13 @@ impl Instruction<Unchecked> {
                     }
                 }
                 *src = new_src;
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             Trap(trap) | Trapv(trap) => {
                 if *trap >= 16 {
                     return Err(format!("Illegal trap vector: {:?}", self));
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
             Pea(src) | Lea(src, _) => {
                 match src {
@@ -621,13 +616,11 @@ impl Instruction<Unchecked> {
                     AddrMode::AIndIdxDisp(_, _, _) => {}
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
-                    AddrMode::PCIndDisp(_) => {}
-                    AddrMode::PCIndIdxDisp(_, _) => {}
                     _ => {
                         return Err(format!("Illegal addressing mode: {:?}", self));
                     }
                 }
-                Ok(self.validate_unchecked())
+                Ok(ValidInstruction(self))
             }
 
             Cmp(_, _, _)
@@ -655,68 +648,7 @@ impl Instruction<Unchecked> {
             | Bhi(_)
             | Bhs(_)
             | Bls(_)
-            | Blo(_) => Ok(self.validate_unchecked()),
-
-            _State(_) => panic!("{:?} not to be used", self),
-        }
-    }
-    fn validate_unchecked(self) -> Instruction<Valid> {
-        match self {
-            Move(size, src, dest) => Move(size, src, dest),
-            MoveMRtoM(size, regs, ea) => MoveMRtoM(size, regs, ea),
-            MoveMMtoR(size, ea, regs) => MoveMMtoR(size, ea, regs),
-            Add(size, src, dest) => Add(size, src, dest),
-            Sub(size, src, dest) => Sub(size, src, dest),
-            Neg(size, dest) => Neg(size, dest),
-            Clr(size, dest) => Clr(size, dest),
-            Not(size, dest) => Not(size, dest),
-            Tst(size, dest) => Tst(size, dest),
-            Cmp(size, src, dest) => Cmp(size, src, dest),
-            Eor(size, src, dest) => Eor(size, src, dest),
-            And(size, src, dest) => And(size, src, dest),
-            Or(size, src, dest) => Or(size, src, dest),
-            Divs(src, dest) => Divs(src, dest),
-            Divu(src, dest) => Divu(src, dest),
-            Muls(src, dest) => Muls(src, dest),
-            Mulu(src, dest) => Mulu(src, dest),
-            Asl(size, src, dest) => Asl(size, src, dest),
-            Asr(size, src, dest) => Asr(size, src, dest),
-            Lsl(size, src, dest) => Lsl(size, src, dest),
-            Lsr(size, src, dest) => Lsr(size, src, dest),
-            Rol(size, src, dest) => Rol(size, src, dest),
-            Ror(size, src, dest) => Ror(size, src, dest),
-            Roxl(size, src, dest) => Roxl(size, src, dest),
-            Roxr(size, src, dest) => Roxr(size, src, dest),
-            Swap(dest) => Swap(dest),
-            Stop => Stop,
-            Nop => Nop,
-            Reset => Reset,
-            Jsr(lbl) => Jsr(lbl),
-            Rte => Rte,
-            Rts => Rts,
-            Trap(trap) => Trap(trap),
-            Trapv(trap) => Trapv(trap),
-            Link(num, areg) => Link(num, areg),
-            Unlk(areg) => Unlk(areg),
-            ExtW(dreg) => ExtW(dreg),
-            ExtL(dreg) => ExtL(dreg),
-            Pea(ea) => Pea(ea),
-            Lea(ea, areg) => Lea(ea, areg),
-            Lbl(lbl) => Lbl(lbl),
-            Bra(lbl) => Bra(lbl),
-            Beq(lbl) => Beq(lbl),
-            Bne(lbl) => Bne(lbl),
-            Bge(lbl) => Bge(lbl),
-            Bgt(lbl) => Bgt(lbl),
-            Ble(lbl) => Ble(lbl),
-            Blt(lbl) => Blt(lbl),
-            Bmi(lbl) => Bmi(lbl),
-            Bpl(lbl) => Bpl(lbl),
-            Bhi(lbl) => Bhi(lbl),
-            Bhs(lbl) => Bhs(lbl),
-            Bls(lbl) => Bls(lbl),
-            Blo(lbl) => Blo(lbl),
-            _State(_) => panic!(),
+            | Blo(_) => Ok(ValidInstruction(self)),
         }
     }
 }
