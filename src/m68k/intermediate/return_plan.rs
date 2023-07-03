@@ -93,13 +93,13 @@ impl ReturnPlan {
     pub fn imm_into_inter_instr(self, from: Imm, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match self {
             ReturnPlan::Binop(b, to) => {
-                let size = Self::get_imm_size(&from, &to, env)?;
-                let instr = InterInstr::Binopi(from.change_size(size), b, to);
+                let size = Self::get_imm_size(from, to.get_type(), env)?;
+                let instr = InterInstr::Binopi(from, b, to);
                 instrs.push(instr);
             }
             ReturnPlan::Move(to) => {
-                let size = Self::get_imm_size(&from, &to, env)?;
-                let instr = InterInstr::Movi(from.change_size(size), to);
+                let size = Self::get_imm_size(from, to.get_type(), env)?;
+                let instr = InterInstr::Movi(from, to);
                 instrs.push(instr);
             }
             ReturnPlan::Condition => {
@@ -107,7 +107,8 @@ impl ReturnPlan {
                 instrs.push(instr);
             }
             ReturnPlan::Push(tt) => {
-                let instr = InterInstr::Pusi(from.as_type(tt, env)?);
+                let size = Self::get_imm_size(from, tt, env)?;
+                let instr = InterInstr::Pusi(from, size);
                 instrs.push(instr);
             }
             ReturnPlan::Return => fienv.reti(from, instrs, env)?,
@@ -115,13 +116,13 @@ impl ReturnPlan {
         }
         Ok(())
     }
-    fn get_imm_size(from: &Imm, to: &Place, env: &Environment) -> Result<DataSize, String> {
-        if !to.get_type().is_magic(env) {
-            return Err(format!("Cannot coerce immediate value {} to non-magic type {}", from, to.get_type()));
+    fn get_imm_size(from: Imm, tt: TypeType, env: &Environment) -> Result<DataSize, String> {
+        if !tt.is_magic(env) {
+            return Err(format!("Cannot coerce immediate value {} to non-magic type {}", from, tt));
         }
-        match to.get_data_size(env) {
+        match tt.get_data_size(env) {
             Some(ds) => Ok(ds),
-            None => Err(format!("Magic type {} has invalid size, {}", to.get_type(), to.get_size(env))),
+            None => Err(format!("Magic type {} has invalid size, {}", tt, tt.get_size(env))),
         }
     }
     /// Returns type type you are expected to give to this plan. If the plan is None or Condition, then this function returns None.

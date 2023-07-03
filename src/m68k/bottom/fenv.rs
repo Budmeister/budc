@@ -202,7 +202,20 @@ impl FunctionEnvironment {
             },
         }
     }
+    /// Returns true precicely when a call to `place_to_dreg` would return a live DReg.
+    pub fn place_is_dreg(
+        &self,
+        place: &Place
+    ) -> bool {
+        if let Place::DTemp(dtemp, _) = place {
+            self.dtemp_map.contains_key(dtemp)
+        } else {
+            false
+        }
+    }
     /// Returns true if the DReg is live. Otherwise, modifications to the value do not affect the original Place.
+    /// 
+    /// The DReg is live if and only if the proxy was used. 
     pub fn place_to_dreg(
         &self,
         place: Place,

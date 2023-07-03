@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::m68k::*;
 
-use super::{super::{instruction::*, fenv::{FunctionEnvironment, Proxy}}, binop::compile_binop_iinstr};
+use super::{super::{instruction::*, fenv::{FunctionEnvironment, Proxy}}, binop::compile_binop_iinstr, binopi::compile_binopi_iinstr};
 use Instruction::*;
 use DReg::*;
 use AReg::*;
@@ -111,7 +111,7 @@ fn get_temp_maps(
             InterInstr::Grs => {}
             InterInstr::Save => {}
             InterInstr::PuVA(_) => {}
-            InterInstr::Pusi(_) => {}
+            InterInstr::Pusi(_, _) => {}
             InterInstr::Puss(_) => {}
             InterInstr::Tsti(_) => {}
             InterInstr::Bcc(_) => {}
@@ -201,7 +201,6 @@ pub fn extend_efficient(
     to: DataSize,
     instrs: &mut Vec<Instruction<Valid>>,
     fenv: &mut FunctionEnvironment,
-    env: &Environment,
     n: Proxy,
 ) -> Result<(AddrMode, bool), String> {
     if from >= to {
@@ -209,7 +208,7 @@ pub fn extend_efficient(
     } else {
         let (dreg, live) = fenv.addr_mode_to_dreg(addr_mode, from, instrs, n)?;
         extend(dreg, from, to, instrs)?;
-        Ok((AddrMode::D(dreg), live))
+        Ok((dreg.into(), live))
     }
 }
 pub fn compile_iinstr(
@@ -220,7 +219,7 @@ pub fn compile_iinstr(
 ) -> Result<(), String> {
     match iinstr {
         InterInstr::Binop(src, b, dest) => compile_binop_iinstr(src, b, dest, instrs, fenv, env),
-        InterInstr::Binopi(_, _, _) => todo!(),
+        InterInstr::Binopi(imm, b, dest) => compile_binopi_iinstr(imm, b, dest, instrs, fenv, env),
         InterInstr::Neg(_) => todo!(),
         InterInstr::Bnot(_) => todo!(),
         InterInstr::Move(_, _) => todo!(),
@@ -230,7 +229,7 @@ pub fn compile_iinstr(
         InterInstr::Lea(_, _, _, _) => todo!(),
         InterInstr::Push(_, _) => todo!(),
         InterInstr::PuVA(_) => todo!(),
-        InterInstr::Pusi(_) => todo!(),
+        InterInstr::Pusi(_, _) => todo!(),
         InterInstr::Puss(_) => todo!(),
         InterInstr::Pea(_, _, _) => todo!(),
         InterInstr::Chk(_, _, _, _) => todo!(),

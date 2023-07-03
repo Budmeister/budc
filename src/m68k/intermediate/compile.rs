@@ -200,7 +200,7 @@ pub fn compile_id_expr(id: IdExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr
 pub fn compile_lit_expr(lit: Literal, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
     match lit {
         Literal::Num(num) => {
-            plan.imm_into_inter_instr(Imm::LWord(num), instrs, fienv, env)?;
+            plan.imm_into_inter_instr(num, instrs, fienv, env)?;
         }
         Literal::Str(string) => {
             let str_ind = fienv.add_lit_string(string.clone());

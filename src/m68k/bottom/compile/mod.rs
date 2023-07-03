@@ -4,4 +4,6 @@ pub use general::*;
 
 mod binop;
 
+mod binopi;
+
 mod condition;

@@ -266,24 +266,24 @@ impl std::fmt::Debug for TypeSizeState {
 }
 // #[derive(Hash, Eq, PartialEq)]
 struct TypeSizeGenerator {
-    typtyp: TypeType,
+    tt: TypeType,
     state: TypeSizeState,
 }
 impl std::fmt::Display for TypeSizeGenerator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "gen({}, {:?})", self.typtyp, self.state)
+        write!(f, "gen({}, {:?})", self.tt, self.state)
     }
 }
 impl TypeSizeGenerator {
     fn new(typtyp: TypeType) -> TypeSizeGenerator {
         TypeSizeGenerator {
-            typtyp,
+            tt: typtyp,
             state: TypeSizeState::NotCalculated,
         }
     }
     fn from_type(typ: &Type) -> TypeSizeGenerator {
         TypeSizeGenerator {
-            typtyp: typ.typtyp.clone(),
+            tt: typ.typtyp.clone(),
             state: TypeSizeState::Calculated(typ.size.clone()),
         }
     }
@@ -295,19 +295,19 @@ impl TypeSizeGenerator {
         match size_generators.get_mut(&index) {
             Some(TypeSizeGenerator {
                 state: TypeSizeState::Calculated(size),
-                typtyp: _,
+                tt: _,
             }) => Ok(
                 size.clone()
             ),
             Some(TypeSizeGenerator {
                 state: TypeSizeState::BeingCalculated,
-                typtyp: _,
+                tt: _,
             }) => Err(format!(
                 "In calculating size for type {}, encountered type loop with type {}",
                 top, index
             )),
             Some(generator) => {
-                match &mut generator.typtyp {
+                match &mut generator.tt {
                     TypeType::Pointer(subtyp) => {
                         let subtyp_clone = (**subtyp).clone();
                         Self::get_size(size_generators, subtyp_clone, top)?;
@@ -454,22 +454,23 @@ impl Environment {
         // Create Type objects
         let types = size_generators
             .into_iter()
-            .map(|(typtyp, gen)| {
+            .map(|(tt, gen)| {
                 if let TypeSizeGenerator {
-                    typtyp: typetype,
+                    tt: _,
                     state: TypeSizeState::Calculated(size),
                 } = gen
                 {
-                    if built_in.contains_key(&typtyp) {
-                        let mut typ = built_in.remove(&typtyp).unwrap();
+                    Self::check_type_size(tt.clone(), &size)?;
+                    if built_in.contains_key(&tt) {
+                        let mut typ = built_in.remove(&tt).unwrap();
                         typ.size = size;
-                        Ok((typetype, typ))
+                        Ok((tt, typ))
                     } else {
                         Ok((
-                            typetype,
+                            tt.clone(),
                             Type {
                                 size,
-                                typtyp,
+                                typtyp: tt,
                                 magic: false,
                             },
                         ))
@@ -477,7 +478,7 @@ impl Environment {
                 } else {
                     Err(format!(
                         "get_size did not calculate the size for {}",
-                        typtyp
+                        tt
                     ))
                 }
             })
@@ -522,6 +523,15 @@ impl Environment {
             }
         }
         (layout, position)
+    }
+
+    fn check_type_size(tt: TypeType, size: &Either<u32, (u32, HashMap<String, (u32, TypeType)>)>) -> Result<(), String> {
+        let (Either::This(size) | Either::That((size, _))) = size;
+        if *size > i32::MAX as u32 {
+            Err(format!("Type {} is too big. Max size is {}, but {} has size of {}", tt, i32::MAX, tt, size))
+        } else {
+            Ok(())
+        }
     }
 }
 

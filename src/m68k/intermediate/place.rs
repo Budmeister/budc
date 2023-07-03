@@ -159,7 +159,7 @@ impl Place {
                 let instr = InterInstr::Move(self.clone(), d_place.clone());
                 instrs.push(instr);
                 if off != 0 {
-                    let instr = InterInstr::Binopi(Imm::Word(off as i16), BudBinop::Plus, d_place.clone());
+                    let instr = InterInstr::Binopi(off, BudBinop::Plus, d_place.clone());
                     instrs.push(instr);
                 }
                 let instr = InterInstr::Chki(len as i16, dtemp);
@@ -168,9 +168,8 @@ impl Place {
             }
         }
         if !is_struct {
-            let size = tt.get_size(env);
+            let size = tt.get_size(env) as i32;
             if let Some(d) = d {
-                let size = Imm::LWord(size as i32);
                 let d_place = Place::DTemp(d, TypeType::Id("i32".to_owned()));
                 let instr = InterInstr::Binopi(size, BudBinop::Times, d_place);
                 instrs.push(instr);

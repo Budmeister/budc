@@ -6,12 +6,19 @@ use AddrMode::*;
 use super::super::fenv::Proxy::*;
 
 
-pub fn cmp(src: AddrMode, dest: AddrMode, size_src: DataSize, size_dest: DataSize, instrs: &mut Vec<Instruction<Valid>>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), String> {
+pub fn cmp(src: AddrMode, dest: AddrMode, size_src: DataSize, size_dest: DataSize, instrs: &mut Vec<Instruction<Valid>>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
     // Minus doesn't necessarily need a dreg, but it does need to be extended
-    let (src, _) = extend_efficient(src, size_src, size_dest, instrs, fenv, env, Proxy1)?;
+    let (src, _) = extend_efficient(src, size_src, size_dest, instrs, fenv, Proxy1)?;
     let (dest, _) = fenv.addr_mode_to_dreg(dest, size_dest, instrs, Proxy2)?;
     extend(dest, size_dest, size_src, instrs)?;
     let instr = Cmp(size_dest, src, dest).validate()?;
+    instrs.push(instr);
+    Ok(())
+}
+
+pub fn cmpi(src: crate::m68k::Imm, dest: AddrMode, size: DataSize, instrs: &mut Vec<Instruction<Valid>>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
+    let (dest, _) = fenv.addr_mode_to_dreg(dest, size, instrs, Proxy1)?;
+    let instr = Cmp(size, src.into(), dest).validate()?;
     instrs.push(instr);
     Ok(())
 }
@@ -23,10 +30,10 @@ pub fn cc_to_eq(size: DataSize, dest: AddrMode, instrs: &mut Vec<Instruction<Val
     let e_label = fenv.get_new_label();
     let mut instr = vec![
         Beq(t_label).validate()?,
-        Move(size, ImmL(Num(0)), dest.clone()).validate()?,
+        Move(size, Imm(Num(0)), dest.clone()).validate()?,
         Bra(e_label).validate()?,
         Lbl(t_label).validate()?,
-        Move(size, ImmL(Num(1)), dest).validate()?,
+        Move(size, Imm(Num(1)), dest).validate()?,
         Lbl(e_label).validate()?,
     ];
     instrs.append(&mut instr);
@@ -40,10 +47,10 @@ pub fn cc_to_ne(size: DataSize, dest: AddrMode, instrs: &mut Vec<Instruction<Val
     let e_label = fenv.get_new_label();
     let mut instr = vec![
         Bne(t_label).validate()?,
-        Move(size, ImmL(Num(0)), dest.clone()).validate()?,
+        Move(size, Imm(Num(0)), dest.clone()).validate()?,
         Bra(e_label).validate()?,
         Lbl(t_label).validate()?,
-        Move(size, ImmL(Num(1)), dest).validate()?,
+        Move(size, Imm(Num(1)), dest).validate()?,
         Lbl(e_label).validate()?,
     ];
     instrs.append(&mut instr);
@@ -57,10 +64,10 @@ pub fn cc_to_gt(size: DataSize, dest: AddrMode, instrs: &mut Vec<Instruction<Val
     let e_label = fenv.get_new_label();
     let mut instr = vec![
         Bgt(t_label).validate()?,
-        Move(size, ImmL(Num(0)), dest.clone()).validate()?,
+        Move(size, Imm(Num(0)), dest.clone()).validate()?,
         Bra(e_label).validate()?,
         Lbl(t_label).validate()?,
-        Move(size, ImmL(Num(1)), dest).validate()?,
+        Move(size, Imm(Num(1)), dest).validate()?,
         Lbl(e_label).validate()?,
     ];
     instrs.append(&mut instr);
@@ -74,10 +81,10 @@ pub fn cc_to_ge(size: DataSize, dest: AddrMode, instrs: &mut Vec<Instruction<Val
     let e_label = fenv.get_new_label();
     let mut instr = vec![
         Bge(t_label).validate()?,
-        Move(size, ImmL(Num(0)), dest.clone()).validate()?,
+        Move(size, Imm(Num(0)), dest.clone()).validate()?,
         Bra(e_label).validate()?,
         Lbl(t_label).validate()?,
-        Move(size, ImmL(Num(1)), dest).validate()?,
+        Move(size, Imm(Num(1)), dest).validate()?,
         Lbl(e_label).validate()?,
     ];
     instrs.append(&mut instr);
@@ -91,10 +98,10 @@ pub fn cc_to_lt(size: DataSize, dest: AddrMode, instrs: &mut Vec<Instruction<Val
     let e_label = fenv.get_new_label();
     let mut instr = vec![
         Blt(t_label).validate()?,
-        Move(size, ImmL(Num(0)), dest.clone()).validate()?,
+        Move(size, Imm(Num(0)), dest.clone()).validate()?,
         Bra(e_label).validate()?,
         Lbl(t_label).validate()?,
-        Move(size, ImmL(Num(1)), dest).validate()?,
+        Move(size, Imm(Num(1)), dest).validate()?,
         Lbl(e_label).validate()?,
     ];
     instrs.append(&mut instr);
@@ -108,10 +115,10 @@ pub fn cc_to_le(size: DataSize, dest: AddrMode, instrs: &mut Vec<Instruction<Val
     let e_label = fenv.get_new_label();
     let mut instr = vec![
         Ble(t_label).validate()?,
-        Move(size, ImmL(Num(0)), dest.clone()).validate()?,
+        Move(size, Imm(Num(0)), dest.clone()).validate()?,
         Bra(e_label).validate()?,
         Lbl(t_label).validate()?,
-        Move(size, ImmL(Num(1)), dest).validate()?,
+        Move(size, Imm(Num(1)), dest).validate()?,
         Lbl(e_label).validate()?,
     ];
     instrs.append(&mut instr);

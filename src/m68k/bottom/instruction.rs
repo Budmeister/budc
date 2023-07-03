@@ -1,5 +1,7 @@
 
 
+use crate::m68k::{DataSize, Imm};
+
 use DReg::*;
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum DReg {
@@ -154,10 +156,8 @@ pub enum AddrMode {
     PCIndDisp(NumOrLbl),
     /// PC indirect indexed displacement
     PCIndIdxDisp(NumOrLbl, ADReg),
-    /// Immediate word
-    ImmW(i16),
     /// Immediate long word
-    ImmL(NumOrLbl),
+    Imm(NumOrLbl),
 }
 impl AddrMode {
     pub fn is_dreg(&self) -> bool {
@@ -167,7 +167,7 @@ impl AddrMode {
         matches!(self, Self::A(_))
     }
     pub fn is_imm(&self) -> bool {
-        matches!(self, Self::ImmW(_) | Self::ImmL(_))
+        matches!(self, Self::Imm(_))
     }
 }
 impl std::fmt::Display for AddrMode {
@@ -184,8 +184,30 @@ impl std::fmt::Display for AddrMode {
             AddrMode::AbsL(abs) => write!(f, "{}", abs),
             AddrMode::PCIndDisp(i) => write!(f, "{}({})", i, GReg::PC),
             AddrMode::PCIndIdxDisp(i, ad) => write!(f, "({}, {}, {})", i, GReg::PC, ad),
-            AddrMode::ImmW(imm) => write!(f, "#{}", imm),
-            AddrMode::ImmL(imm) => write!(f, "#{}", imm),
+            AddrMode::Imm(imm) => write!(f, "#{}", imm),
+        }
+    }
+}
+impl From<Imm> for AddrMode {
+    fn from(value: Imm) -> Self {
+        Self::Imm(NumOrLbl::Num(value))
+    }
+}
+impl From<DReg> for AddrMode {
+    fn from(value: DReg) -> Self {
+        Self::D(value)
+    }
+}
+impl From<AReg> for AddrMode {
+    fn from(value: AReg) -> Self {
+        Self::A(value)
+    }
+}
+impl From<ADReg> for AddrMode {
+    fn from(value: ADReg) -> Self {
+        match value {
+            ADReg::A(areg) => areg.into(),
+            ADReg::D(dreg) => dreg.into(),
         }
     }
 }
@@ -271,7 +293,6 @@ pub struct Unchecked;
 
 use Instruction::*;
 
-use crate::m68k::DataSize;
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub enum Instruction<State = Unchecked> {
     // Data movement
@@ -485,8 +506,7 @@ impl Instruction<Unchecked> {
                     AddrMode::AbsL(_) => {}
                     AddrMode::PCIndDisp(_) => {}
                     AddrMode::PCIndIdxDisp(_, _) => {}
-                    AddrMode::ImmW(_) => {}
-                    AddrMode::ImmL(_) => {}
+                    AddrMode::Imm(_) => {}
                     _ => {
                         return Err(format!("Illegal addressing mode: {:?}", self));
                     }
@@ -524,8 +544,7 @@ impl Instruction<Unchecked> {
                     AddrMode::AbsL(_) => {}
                     AddrMode::PCIndDisp(_) => {}
                     AddrMode::PCIndIdxDisp(_, _) => {}
-                    AddrMode::ImmW(_) => {}
-                    AddrMode::ImmL(_) => {}
+                    AddrMode::Imm(_) => {}
                     _ => {
                         return Err(format!("Illegal addressing mode: {:?}", self));
                     }
@@ -545,20 +564,21 @@ impl Instruction<Unchecked> {
                     Some(src) => {
                         match src {
                             AddrMode::D(_) => new_src = Some(src.to_owned()),
-                            AddrMode::ImmW(w) => {
-                                if *w < 1 {
-                                    new_src = None;
-                                } else if *w > 8 {
-                                    return Err(format!(
-                                        "Shifting and rotating literals can only be [1,8]: {:?}",
-                                        self
-                                    ));
+                            AddrMode::Imm(num_or_lbl) => {
+                                if let NumOrLbl::Num(num) = num_or_lbl {
+                                    if *num < 1 {
+                                        new_src = None;
+                                    } else if *num > 8 {
+                                        return Err(format!(
+                                            "Shifting and rotating literals can only be [1,8]: {:?}",
+                                            self
+                                        ));
+                                    } else {
+                                        new_src = Some(src.to_owned())
+                                    }
                                 } else {
-                                    new_src = Some(src.to_owned())
+                                    new_src = Some(src.to_owned());
                                 }
-                            }
-                            AddrMode::ImmL(_l) => {
-                                new_src = Some(src.to_owned());
                             }
                             _ => {
                                 return Err(format!("Illegal addressing mode: {:?}", self));

@@ -166,7 +166,6 @@ impl FunctionInterEnvironment {
         Ok(())
     }
     pub fn reti(&mut self, imm: Imm, instrs: &mut Vec<InterInstr>, env: &Environment) -> Result<(), String> {
-        let imm = imm.as_type(self.return_type(), env)?;
         let to = env.ret_place(self.get_name())?;
         let instr = InterInstr::Movi(imm, to);
         instrs.push(instr);
