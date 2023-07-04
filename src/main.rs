@@ -1,3 +1,6 @@
+//! Author:     Brian Smith
+//! Year:       2023
+
 // pub mod slp_names;
 // pub mod lexer;
 // use crate::lexer::*;

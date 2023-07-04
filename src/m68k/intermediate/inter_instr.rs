@@ -1,3 +1,6 @@
+//! Author:     Brian Smith
+//! Year:       2023
+
 use crate::{m68k::*, bud::BudBinop};
 
 use super::place::*;

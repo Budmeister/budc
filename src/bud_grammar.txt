@@ -1,5 +1,7 @@
 Grammar for the Bud programming language
 Version 0.2.0
+Author: Brian Smith
+Year:   2023
 
 Non-terminals:
 S' (Start)

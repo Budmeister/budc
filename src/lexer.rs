@@ -1,3 +1,8 @@
+//! Logic for handling the lexer
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use logos::{Logos, Lexer};
 use crate::slp::*;
 // use crate::slp_names::*;

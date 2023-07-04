@@ -1,3 +1,15 @@
+//! The function environment holds lots of information about the function
+//! and stack frame. For example
+//! * The literal strings and the labels that point to them
+//! * All variables, their types, and their locations on the stack frame
+//! * The mapping of temp registers to physical registers
+//! * The current height of the stack beyond its starting point
+//! 
+//! `FunctionEnvironment` gives many functions for converting between
+//! various types of locations (`Place`, `AddrMode`, `DTemp`, `DReg`, etc.).
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
 
 use std::{collections::{HashMap, HashSet}, ops::RangeFrom};
 
@@ -31,6 +43,9 @@ impl StackItem {
 /// The bool represents if the DReg is live or not. If not,
 /// changes to the DReg do not affect the original Place
 type Proxied = (DReg, bool);
+/// The bool represents if the AReg is live or not. If not,
+/// changes to the AReg do not affect the original Place
+type ProxiedAddr = (AReg, bool);
 
 pub struct FunctionEnvironment {
     pub lit_strings: Vec<(usize, String)>,
@@ -130,6 +145,19 @@ impl FunctionEnvironment {
 
         stack_frame
     }
+    /// Returns an addressing mode that points to this var exactly as if 
+    /// `place_to_addr_mode` was called. The difference is that the caller
+    /// does not need to know the type
+    /// 
+    /// This function is intended for finding the address of a variable and
+    /// loading it using `Lea`. The returned AddrMode will always be
+    /// AIndDisp and will therefore be a valid source for `Lea`
+    pub fn var_as_addr_mode(
+        &self,
+        name: String,
+    ) -> Result<AddrMode, String> {
+        self.stack_item_to_addr_mode(StackItem::Var(name))
+    }
     /// Returns an addressing mode that points to the given place.
     ///
     /// The returned AddrMode is always live, but it may use a proxy if the
@@ -143,7 +171,7 @@ impl FunctionEnvironment {
         n: Proxy,
     ) -> Result<AddrMode, String> {
         match place {
-            Place::Var(name) => self.stack_item_to_addr_mode(StackItem::Var(name.name)),
+            Place::Var(name) => self.var_as_addr_mode(name.name),
             Place::ATemp(atemp) => match self.atemp_map.get(&atemp).unwrap() {
                 Some(areg) => Ok(AddrMode::A(*areg)),
                 None => Ok(self.stack_item_to_addr_mode(StackItem::ATemp(atemp))?),
@@ -179,7 +207,7 @@ impl FunctionEnvironment {
             }
         }
     }
-    /// The returned AddrMode is always live.
+    /// The returned AddrMode is always live. It will alwyas be AIndDisp
     pub fn stack_item_to_addr_mode(&self, stack_item: StackItem) -> Result<AddrMode, String> {
         match stack_item.clone() {
             StackItem::Var(name) => match self.stack_frame.get(&stack_item) {
@@ -213,6 +241,17 @@ impl FunctionEnvironment {
             false
         }
     }
+    /// Returns true precicely when a call to `place_to_areg` would return a live AReg.
+    pub fn place_is_areg(
+        &self,
+        place: &Place
+    ) -> bool {
+        if let Place::ATemp(atemp) = place {
+            self.atemp_map.contains_key(atemp)
+        } else {
+            false
+        }
+    }
     /// Returns true if the DReg is live. Otherwise, modifications to the value do not affect the original Place.
     /// 
     /// The DReg is live if and only if the proxy was used. 
@@ -231,21 +270,18 @@ impl FunctionEnvironment {
                         name
                     ));
                 }
-                let proxy = n.into();
+                let proxy: DReg = n.into();
                 let size = name.tt.get_data_size(env).unwrap();
                 let from = self.stack_item_to_addr_mode(StackItem::Var(name.name))?;
-                let to = AddrMode::D(proxy);
+                let to = proxy.into();
                 let instr = Instruction::Move(size, from, to).validate()?;
                 instrs.push(instr);
                 Ok((proxy, false))
             }
             Place::ATemp(atemp) => {
-                let proxy = n.into();
-                let from = match self.atemp_map.get(&atemp).unwrap() {
-                    Some(areg) => AddrMode::A(*areg),
-                    None => self.stack_item_to_addr_mode(StackItem::ATemp(atemp))?,
-                };
-                let to = AddrMode::D(proxy);
+                let proxy: DReg = n.into();
+                let from = self.atemp_to_addr_mode(atemp)?;
+                let to = proxy.into();
                 let size = DataSize::LWord;
                 let instr = Instruction::Move(size, from, to).validate()?;
                 instrs.push(instr);
@@ -255,7 +291,99 @@ impl FunctionEnvironment {
                 // What do we do with tt?
                 self.dtemp_as_dreg(dtemp, instrs, n)
             }
-            Place::Ref(_, _, _, _) => todo!(),
+            Place::Ref(atemp, dtemp, off, tt) => {
+                if tt.is_array() || tt.is_struct() {
+                    return Err(format!(
+                        "Cannot move value of type {} into data reg",
+                        tt
+                    ));
+                }
+                let areg = self.atemp_as_areg(atemp, instrs, n)?.0;
+                let dreg = dtemp
+                        .map(|dtemp| Ok::<DReg, String>(self.dtemp_as_dreg(dtemp, instrs, n)?.0))
+                        .transpose()?;
+                let size = tt.get_data_size(env).unwrap();
+                let from = (off, areg, dreg).into();
+                let proxy: DReg = n.into();
+                let to = proxy.into();
+                let instr = Instruction::Move(size, from, to).validate()?;
+                instrs.push(instr);
+                Ok((proxy, false))
+            },
+        }
+    }
+    /// Returns true if the AReg is live. Otherwise, modifications to the value do not affect the original Place.
+    /// 
+    /// The AReg is live if and only if the proxy was used. 
+    pub fn place_to_areg(
+        &self,
+        place: Place,
+        instrs: &mut Vec<ValidInstruction>,
+        env: &Environment,
+        n: Proxy
+    ) -> Result<ProxiedAddr, String> {
+        match place {
+            Place::Var(name) => {
+                if name.tt.is_array() || name.tt.is_struct() {
+                    return Err(format!(
+                        "Cannot move array or struct {} into addr reg",
+                        name
+                    ));
+                }
+                let proxy: AReg = n.into();
+                let size = name.tt.get_data_size(env).unwrap();
+                let from = self.stack_item_to_addr_mode(StackItem::Var(name.name))?;
+                let to = proxy.into();
+                let instr = Instruction::Move(size, from, to).validate()?;
+                instrs.push(instr);
+                Ok((proxy, false))
+            }
+            Place::ATemp(atemp) => {
+                self.atemp_as_areg(atemp, instrs, n)
+            }
+            Place::DTemp(dtemp, tt) => {
+                let proxy: AReg = n.into();
+                let size = tt.get_data_size(env).unwrap();
+                let from = self.dtemp_to_addr_mode(dtemp)?;
+                let to = proxy.into();
+                let instr = Instruction::Move(size, from, to).validate()?;
+                instrs.push(instr);
+                Ok((proxy, false))
+            }
+            Place::Ref(atemp, dtemp, off, tt) => {
+                if tt.is_array() || tt.is_struct() {
+                    return Err(format!(
+                        "Cannot move value of type {} into data reg",
+                        tt
+                    ));
+                }
+                let areg = self.atemp_as_areg(atemp, instrs, n)?.0;
+                let dreg = dtemp
+                        .map(|dtemp| Ok::<DReg, String>(self.dtemp_as_dreg(dtemp, instrs, n)?.0))
+                        .transpose()?;
+                let size = tt.get_data_size(env).unwrap();
+                let from = (off, areg, dreg).into();
+                let proxy: AReg = n.into();
+                let to = proxy.into();
+                let instr = Instruction::Move(size, from, to).validate()?;
+                instrs.push(instr);
+                Ok((proxy, false))
+            },
+
+        }
+    }
+    fn dtemp_to_addr_mode(&self, dtemp: DTemp) -> Result<AddrMode, String> {
+        match self.dtemp_map.get(&dtemp) {
+            Some(Some(dreg)) => Ok((*dreg).into()),
+            Some(None) => self.stack_item_to_addr_mode(StackItem::DTemp(dtemp)),
+            None => Err(format!("Given dtemp, D{}, was not in dreg or on stack", dtemp)),
+        }
+    }
+    fn atemp_to_addr_mode(&self, atemp: ATemp) -> Result<AddrMode, String> {
+        match self.atemp_map.get(&atemp) {
+            Some(Some(areg)) => Ok((*areg).into()),
+            Some(None) => self.stack_item_to_addr_mode(StackItem::ATemp(atemp)),
+            None => Err(format!("Given atemp, A{}, was not in areg or on stack", atemp)),
         }
     }
     /// If the given AddrMode is DReg, returns the DReg. Otherwise, moves the value into
@@ -277,7 +405,7 @@ impl FunctionEnvironment {
             Ok((proxy, true))
         }
     }
-    fn atemp_as_areg(
+    pub fn atemp_as_areg(
         &self,
         atemp: ATemp,
         instrs: &mut Vec<ValidInstruction>,
@@ -295,7 +423,7 @@ impl FunctionEnvironment {
             }
         }
     }
-    fn dtemp_as_dreg(
+    pub fn dtemp_as_dreg(
         &self,
         dtemp: DTemp,
         instrs: &mut Vec<ValidInstruction>,

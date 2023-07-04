@@ -1,3 +1,8 @@
+//! Grammar for the Bud Programming Language
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use std::fmt::{Debug, Display};
 
 use crate::grammar;

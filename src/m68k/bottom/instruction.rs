@@ -1,4 +1,12 @@
-
+//! 68000 Instructions are represented by the `ValidInstruction` enum.
+//! You should only get a `ValidInstruction` by first constructing an
+//! `Instruction` and calling `validate()` on it to make sure you passed
+//! the parameters in correctly. This is not the best way to do this, but
+//! the difference between valid and invalid 68k instructions is quite 
+//! complex.
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
 
 use crate::m68k::{DataSize, Imm};
 
@@ -115,14 +123,16 @@ impl std::fmt::Debug for GReg {
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub enum NumOrLbl {
-    Num(i32),
-    Lbl(String),
+    Num(Imm),
+    NamedLbl(String),
+    Lbl(usize),
 }
 impl std::fmt::Display for NumOrLbl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NumOrLbl::Num(num) => write!(f, "{}", num),
-            NumOrLbl::Lbl(lbl) => write!(f, "{}", lbl),
+            Self::Num(num) => write!(f, "{}", num),
+            Self::NamedLbl(lbl) => write!(f, "{}", lbl),
+            Self::Lbl(lbl) => write!(f, "{}", lbl),
         }
     }
 }
@@ -203,6 +213,19 @@ impl From<ADReg> for AddrMode {
             ADReg::A(areg) => areg.into(),
             ADReg::D(dreg) => dreg.into(),
         }
+    }
+}
+impl From<(Imm, AReg, Option<DReg>)> for AddrMode {
+    fn from((off, areg, dreg): (Imm, AReg, Option<DReg>)) -> Self {
+        match dreg {
+            Some(dreg) => Self::AIndIdxDisp(NumOrLbl::Num(off), areg, D(dreg)),
+            None => Self::AIndDisp(NumOrLbl::Num(off), areg),
+        }
+    }
+}
+impl From<NumOrLbl> for AddrMode {
+    fn from(value: NumOrLbl) -> Self {
+        Self::Imm(value)
     }
 }
 
@@ -375,10 +398,17 @@ pub enum Instruction {
 impl Instruction {
     pub fn validate(mut self) -> Result<ValidInstruction, String> {
         match &mut self {
-            Move(_, _src, dest) => {
+            Move(size, _src, dest) => {
                 match &dest {
                     AddrMode::D(_) => {}
-                    AddrMode::A(_) => {} // Moving to areg might need MOVEA instruction
+                    AddrMode::A(_) => {
+                        if *size == DataSize::Byte {
+                            return Err(format!(
+                                "Illegal addressing mode for Move instruction: {}",
+                                dest
+                            ))
+                        }
+                    } // Moving to areg might need MOVEA instruction
                     AddrMode::AInd(_) => {}
                     AddrMode::AIndInc(_) => {}
                     AddrMode::AIndDec(_) => {}

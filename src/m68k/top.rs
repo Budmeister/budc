@@ -1,5 +1,10 @@
+//! Logic for analyzing `Expr`s. Notably, this file calculates 
+//! the sizes of all types and calls `get_inter_instrs()`.
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use std::collections::{HashMap, HashSet};
-use std::ops::RangeFrom;
 
 use crate::bud::{BinExpr, Expr, NonBinExpr, TypeExpr, VarDecl};
 use crate::logging::LoggingOptions;

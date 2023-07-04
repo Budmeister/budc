@@ -1,3 +1,5 @@
+//! Author:     Brian Smith
+//! Year:       2023
 
 pub mod tools;
 pub use crate::m68k::tools::*;

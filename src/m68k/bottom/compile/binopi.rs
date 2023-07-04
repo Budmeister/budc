@@ -1,3 +1,8 @@
+//! Compilation from `InterInstr::Binopi` to `ValidInstruction`
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use crate::{m68k::*, bud::BudBinop};
 use super::{super::fenv::Proxy, condition::*};
 

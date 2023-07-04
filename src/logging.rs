@@ -1,4 +1,10 @@
-
+//! LoggingOptions dictates whether each part of the program should
+//! be logged. It should be removed and just use logging levels. 
+//! The overflow of information should be handled by 
+//! `output_analyzer.py`
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
 
 use colored::{ColoredString, Colorize};
 use log::{Record, Level, Metadata};

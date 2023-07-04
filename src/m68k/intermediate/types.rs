@@ -1,3 +1,19 @@
+//! In almost all cases, type determination in Bud is top-down. That is,
+//! when an expression is evaluated, its return type is given, and if,
+//! by its nature, it must evaluate to a different type, then an error
+//! is thrown.
+//! 
+//! However, in `if` statements, it is acceptable for the condition to 
+//! evaluate to `i8`, `i16`, or `i32`, and it does not make sense to 
+//! force the user to one type of boolean and throw an error if they 
+//! use the wrong type. 
+//! 
+//! In this case, the expression is asked for its `type_preference`, 
+//! and if it is not a "large" type, it is given as the return type.
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use crate::{bud::*, m68k::*};
 
 use super::{fienv::*, place::*, inter_instr::*};

@@ -1,3 +1,6 @@
+//! Author:     Brian Smith
+//! Year:       2023
+
 use log::*;
 
 use crate::{m68k::*, bud::*};
@@ -474,17 +477,11 @@ pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs
     }
     Ok(())
 }
-fn eval_cond(cond: Expr, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
-    let tt = cond.type_preference(fienv, env)?;
-    // Maybe we could use D0--the return register--instead of getting a new register
-    // because we don't care about the actual value, only the condition codes
-    // Maybe CC should be a ReturnPlan??
-    let dtemp = fienv.get_data_temp(tt.clone())?;
-    let d_place = Place::DTemp(dtemp, tt);
-    let plan = ReturnPlan::Move(d_place.clone());
+fn eval_cond(cond: Expr, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    let plan = ReturnPlan::Condition;
     compile_expr(cond, plan, instrs, fienv, env)?;
     // Condition codes should be set accordingly. I hope they are.
-    Ok(d_place)
+    Ok(())
 }
 pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
     match plan {
@@ -499,11 +496,9 @@ pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Ve
         ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from if statement.")); }
         ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from if statement. Tried to push type {}", tt)); }
     }
-    let d_place = eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
     let instr = InterInstr::Beq(f_label);
     instrs.push(instr);
-    d_place.free(fienv);
     compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
     let instr = InterInstr::Lbl(f_label);
     instrs.push(instr);
@@ -514,12 +509,11 @@ pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Ve
     Ok(())
 }
 pub fn compile_if_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-    let d_place = eval_cond(cond, instrs, fienv, env)?;
+    eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
     let e_label = fienv.get_new_label();    // end label
     let instr = InterInstr::Beq(f_label);
     instrs.push(instr);
-    d_place.free(fienv);
     compile_expr(expr1, plan.clone(), instrs, fienv, env)?;
     let instr = InterInstr::Goto(e_label);
     instrs.push(instr);
@@ -543,11 +537,10 @@ pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mu
         ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from unless statement.")); }
         ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from unless statement. Tried to push type {}", tt)); }
     }
-    let d_place = eval_cond(cond, instrs, fienv, env)?;
+    eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
     let instr = InterInstr::Bne(f_label);
     instrs.push(instr);
-    d_place.free(fienv);
     compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
     let instr = InterInstr::Lbl(f_label);
     instrs.push(instr);
@@ -558,12 +551,11 @@ pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mu
     Ok(())
 }
 pub fn compile_unless_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
-    let d_place = eval_cond(cond, instrs, fienv, env)?;
+    eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
     let e_label = fienv.get_new_label();    // end_label
     let instr = InterInstr::Bne(f_label);
     instrs.push(instr);
-    d_place.free(fienv);
     compile_expr(expr1, plan.clone(), instrs, fienv, env)?;
     let instr = InterInstr::Goto(e_label);
     instrs.push(instr);
@@ -591,10 +583,9 @@ pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut
     let break_label = fienv.get_new_label();
     let instr = InterInstr::Lbl(continue_label);
     instrs.push(instr);
-    let d_place = eval_cond(cond, instrs, fienv, env)?;
+    eval_cond(cond, instrs, fienv, env)?;
     let instr = InterInstr::Beq(break_label);
     instrs.push(instr);
-    d_place.free(fienv);
     fienv.push_loop_stack(break_label, continue_label);
     compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
     fienv.pop_loop_stack();
@@ -652,10 +643,9 @@ pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut V
         None => ReturnPlan::None,
     };
     compile_expr(expr, body_plan, instrs, fienv, env)?;
-    let d_place = eval_cond(cond, instrs, fienv, env)?;
+    eval_cond(cond, instrs, fienv, env)?;
     let instr = InterInstr::Bne(continue_label);
     instrs.push(instr);
-    d_place.free(fienv);
     fienv.pop_loop_stack();
     let instr = InterInstr::Lbl(break_label);
     instrs.push(instr);

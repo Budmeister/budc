@@ -1,3 +1,5 @@
+//! Author:     Brian Smith
+//! Year:       2023
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Either<T, U> {

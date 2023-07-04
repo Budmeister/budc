@@ -1,3 +1,8 @@
+//! SLR(1) parsing
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use crate::{grammar::*, logging::LoggingOptions};
 use colored::Colorize;
 use logos::{Lexer, Logos};

@@ -1,3 +1,19 @@
+//! Function environment for the intermediate stage. The function environment holds
+//! a lot of information about the function, that is important for compiling. For 
+//! example:
+//! * The function signature
+//! * The list of variables and their types
+//! * The literal strings and the labels that point to them
+//! * The number of active nested loops
+//! * All the active and inactive temporary registers
+//! 
+//! At this point, the stack frame layout has not been generated, so rather than
+//! producing 68k instructions, this stage produces `InterInstr`s, which the next
+//! stage then uses to produce 68k `ValidInstruction`s.
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use std::ops::RangeFrom;
 
 use crate::m68k::*;

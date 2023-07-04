@@ -1,10 +1,15 @@
+//! Definitions of components for the grammar
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::hash::Hash;
 
-use log::{warn, debug, error};
+use log::*;
 
 use colored::Colorize;
 pub enum Option2<T, U> {

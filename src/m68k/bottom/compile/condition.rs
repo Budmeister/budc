@@ -1,3 +1,8 @@
+//! Tools for compiling conditions
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use crate::m68k::*;
 
 use Instruction::*;

@@ -1,3 +1,7 @@
+//! Intermediate level compilation; this level produces `InterInstr`s
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
 
 pub mod types;
 pub use types::*;

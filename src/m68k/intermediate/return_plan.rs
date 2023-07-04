@@ -1,3 +1,16 @@
+//! `ReturnPlan`s tell an expression where to put its output. It is
+//! typically desired that the expression being compiled move its output
+//! to a given `Place`, but sometimes the compiling function can 
+//! optimize the code by knowing that the output is about to be combined
+//! with another `Place` with a binop or is about to be pushed onto the
+//! stack.
+//! 
+//! Note: Only magic types (`i8`, `i16`, `i32`) can be combined with 
+//! binops.
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use crate::{bud::BudBinop, m68k::*};
 
 use super::{inter_instr::*, fienv::FunctionInterEnvironment};
@@ -93,12 +106,10 @@ impl ReturnPlan {
     pub fn imm_into_inter_instr(self, from: Imm, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
         match self {
             ReturnPlan::Binop(b, to) => {
-                let size = Self::get_imm_size(from, to.get_type(), env)?;
                 let instr = InterInstr::Binopi(from, b, to);
                 instrs.push(instr);
             }
             ReturnPlan::Move(to) => {
-                let size = Self::get_imm_size(from, to.get_type(), env)?;
                 let instr = InterInstr::Movi(from, to);
                 instrs.push(instr);
             }

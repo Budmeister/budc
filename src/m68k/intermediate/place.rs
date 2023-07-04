@@ -1,3 +1,18 @@
+//! The generic location that a value can have is a `Place`. `Place`s
+//! can be variables, address temps, data temps, or refs (an address
+//! temp holding a pointer with an optional data temp as an index and
+//! an immediate offset). As a Var, ATemp or DTemp, a `Place` refers to 
+//! that register, but as a Ref, it refers to the thing pointed to by
+//! the Ref. 
+//! 
+//! Therefore, some `Place`s, if they are Var or Ref, can be too big to
+//! fit in a register. So, the user must be careful not to move "large"
+//! values into regisers. As a rule, values of array or struct types
+//! SHOULD NOT be put into registers, even if they would fit. 
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use crate::{m68k::*, bud::BudBinop};
 
 use super::{inter_instr::*, fienv::FunctionInterEnvironment};
@@ -174,7 +189,7 @@ impl Place {
                 let instr = InterInstr::Binopi(size, BudBinop::Times, d_place);
                 instrs.push(instr);
             }
-            off *= size as i32;
+            off *= size;
         }
         match self {
             Place::ATemp(atemp) => Ok(Place::Ref(atemp, d, off, tt)),
@@ -182,7 +197,7 @@ impl Place {
                 if is_struct || is_array.is_some() {
                     Err(format!("Cannot store structs or arrays in data registers"))
                 } else {
-                    Ok(Place::Ref(Self::d_to_a(d_, tt.clone(), instrs, fienv, env)?, d, off, tt.clone()))
+                    Ok(Place::Ref(Self::d_to_a(d_, tt.clone(), instrs, fienv, env)?, d, off, tt))
                 }
             },
             Place::Ref(a, mut d_, off_, _) => {

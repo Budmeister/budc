@@ -1,3 +1,9 @@
+//! The functions in this file prepare the compilation process to begin by initializing
+//! the FunctionInterEnvironment.
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use crate::{m68k::*, bud::*, logging::LoggingOptions};
 
 use super::{return_plan::ReturnPlan, inter_instr::InterInstr, fienv::FunctionInterEnvironment, place::Place};
