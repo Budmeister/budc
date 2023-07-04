@@ -87,7 +87,7 @@ fn get_temp_maps(
             | InterInstr::MoVA(_, place)
             | InterInstr::Movi(_, place)
             | InterInstr::Movs(_, place)
-            | InterInstr::Push(place, _)
+            | InterInstr::Push(place)
             | InterInstr::Tst(place) => {
                 update_temp_usages_by_place(&mut dtemp_usages, &mut atemp_usages, place);
             }
@@ -238,11 +238,11 @@ pub fn compile_iinstr(
         InterInstr::Movi(imm, to) => compile_movi_iinstr(imm, to, instrs, fenv, env),
         InterInstr::Movs(string_lbl, to) => compile_movs_iinstr(string_lbl, to, instrs, fenv),
         InterInstr::Lea(atemp, dtemp, off, to) => compile_lea_iinstr(atemp, dtemp, off, to, instrs, fenv),
-        InterInstr::Push(_, _) => todo!(),
-        InterInstr::PuVA(_) => todo!(),
-        InterInstr::Pusi(_, _) => todo!(),
-        InterInstr::Puss(_) => todo!(),
-        InterInstr::Pea(_, _, _) => todo!(),
+        InterInstr::Push(from) => compile_push_iinstr(from, instrs, fenv, env),
+        InterInstr::PuVA(name) => compile_puva_iinstr(name, instrs, fenv),
+        InterInstr::Pusi(imm, size) => compile_pusi_iinstr(imm, size, instrs),
+        InterInstr::Puss(string_lbl) => compile_puss_iinstr(string_lbl, instrs),
+        InterInstr::Pea(atemp, dtemp, off) => compile_pea_iinstr(atemp, dtemp, off, instrs, fenv),
         InterInstr::Chk(_, _, _, _) => todo!(),
         InterInstr::Chki(_, _) => todo!(),
         InterInstr::SMarker(_) => todo!(),

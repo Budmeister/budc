@@ -299,9 +299,8 @@ impl FunctionEnvironment {
                     ));
                 }
                 let areg = self.atemp_as_areg(atemp, instrs, n)?.0;
-                let dreg = dtemp
-                        .map(|dtemp| Ok::<DReg, String>(self.dtemp_as_dreg(dtemp, instrs, n)?.0))
-                        .transpose()?;
+                let dreg = self.opt_dtemp_as_opt_dreg(dtemp, instrs, n)?
+                        .map(|dreg| dreg.0);
                 let size = tt.get_data_size(env).unwrap();
                 let from = (off, areg, dreg).into();
                 let proxy: DReg = n.into();
@@ -358,9 +357,8 @@ impl FunctionEnvironment {
                     ));
                 }
                 let areg = self.atemp_as_areg(atemp, instrs, n)?.0;
-                let dreg = dtemp
-                        .map(|dtemp| Ok::<DReg, String>(self.dtemp_as_dreg(dtemp, instrs, n)?.0))
-                        .transpose()?;
+                let dreg = self.opt_dtemp_as_opt_dreg(dtemp, instrs, n)?
+                        .map(|dreg| dreg.0);
                 let size = tt.get_data_size(env).unwrap();
                 let from = (off, areg, dreg).into();
                 let proxy: AReg = n.into();
@@ -444,6 +442,16 @@ impl FunctionEnvironment {
     }
     pub fn get_new_label(&mut self) -> usize {
         self.label_gen.next().unwrap()
+    }
+    pub fn opt_dtemp_as_opt_dreg(
+        &self,
+        dtemp: Option<DTemp>,
+        instrs: &mut Vec<ValidInstruction>,
+        n: Proxy,
+    ) -> Result<Option<Proxied>, String> {
+        dtemp
+                .map(|dtemp| self.dtemp_as_dreg(dtemp, instrs, n))
+                .transpose()
     }
 }
 

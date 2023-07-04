@@ -78,8 +78,8 @@ impl ReturnPlan {
                 return Ok(());
             }
             ReturnPlan::Push(tt) => {
-                to_tt = tt.clone();
-                let instr = InterInstr::Push(from.clone(), tt);
+                to_tt = tt;
+                let instr = InterInstr::Push(from.clone());
                 instrs.push(instr);
                 from.free(fienv);
             }

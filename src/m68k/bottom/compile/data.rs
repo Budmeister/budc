@@ -130,7 +130,7 @@ pub fn compile_move_iinstr(
         }
 
         let index: DReg = Proxy1.into();
-        let instr = Move(LWord, (dest_size as i32).into(), index.into()).validate()?;
+        let instr = Move(LWord, (dest_size as Imm).into(), index.into()).validate()?;
         instrs.push(instr);
 
         let src = AddrMode::AIndIdxDisp(Num(0), src_areg, D(index));
@@ -142,7 +142,7 @@ pub fn compile_move_iinstr(
             Lbl(start_label).validate()?,
             Move(Word, src, dest).validate()?,
             Sub(LWord, 2.into(), index.into()).validate()?,
-            Bne(start_label).validate()?,
+            Blt(start_label).validate()?,
         ];
         instrs.append(&mut instr);
         Ok(())
@@ -184,9 +184,8 @@ pub fn compile_lea_iinstr(
     fenv: &mut FunctionEnvironment,
 ) -> Result<(), String> {
     let areg = fenv.atemp_as_areg(atemp, instrs, Proxy1)?.0;
-    let dreg = dtemp
-            .map(|dtemp| Ok::<DReg, String>(fenv.dtemp_as_dreg(dtemp, instrs, Proxy1)?.0))
-            .transpose()?;
+    let dreg = fenv.opt_dtemp_as_opt_dreg(dtemp, instrs, Proxy1)?
+            .map(|dreg| dreg.0);
     let from = (off, areg, dreg).into();
     let (to_areg, live) = fenv.atemp_as_areg(to, instrs, Proxy2)?;
     let instr = Lea(from, to_areg).validate()?;

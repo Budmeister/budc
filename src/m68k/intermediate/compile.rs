@@ -61,12 +61,12 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
                 }
                 (ReturnPlan::Push(tt), _, _) => {
                     let dtemp = fienv.get_data_temp(tt.clone())?;
-                    let d_place = Place::DTemp(dtemp, tt.clone());
+                    let d_place = Place::DTemp(dtemp, tt);
                     let plan = ReturnPlan::Move(d_place.clone());
                     compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
                     let plan = ReturnPlan::Binop(b, d_place.clone());
                     compile_bin_expr(*be, plan, instrs, fienv, env)?;
-                    let instr = InterInstr::Push(d_place, tt);
+                    let instr = InterInstr::Push(d_place);
                     fienv.free_data_temp(dtemp);
                     instrs.push(instr);
                 },

@@ -175,6 +175,12 @@ impl AddrMode {
     pub fn is_imm(&self) -> bool {
         matches!(self, Self::Imm(_))
     }
+    pub fn get_push() -> Self {
+        Self::AIndDec(SP)
+    }
+    pub fn get_pop() -> Self {
+        Self::AIndInc(SP)
+    }
 }
 impl std::fmt::Display for AddrMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

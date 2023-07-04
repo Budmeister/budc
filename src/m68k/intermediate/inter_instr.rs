@@ -21,7 +21,7 @@ pub enum InterInstr {
     Movi(Imm, Place),
     Movs(usize, Place),                         // Move string literal (by the string literal's global label)
     Lea(ATemp, Option<DTemp>, i32, ATemp),      // Load effective address into an address register
-    Push(Place, TypeType),
+    Push(Place),
     PuVA(String),
     Pusi(Imm, DataSize),
     Puss(usize),                                // Push string literal (by the string literal's global label)
