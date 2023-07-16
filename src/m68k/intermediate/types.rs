@@ -142,8 +142,11 @@ impl Environment {
 
 impl TypeType {
     pub fn get_size(&self, env: &Environment) -> u32 {
-        match env.types.get(self).unwrap().size {
-            Either::This(size) | Either::That((size, _)) => size
+        match env.types.get(self) {
+            Some(typ) => match typ.size {
+                Either::This(size) | Either::That((size, _)) => size
+            }
+            None => panic!("Type {} not found", self)
         }
     }
     // Returns None if the size is not a Byte, Word, or LWord

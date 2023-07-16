@@ -243,11 +243,12 @@ impl From<ADReg> for AddrMode {
         }
     }
 }
-impl From<(Imm, AReg, Option<DReg>)> for AddrMode {
-    fn from((off, areg, dreg): (Imm, AReg, Option<DReg>)) -> Self {
+impl<T> From<(T, AReg, Option<DReg>)> for AddrMode 
+where T: Into<NumOrLbl> {
+    fn from((off, areg, dreg): (T, AReg, Option<DReg>)) -> Self {
         match dreg {
-            Some(dreg) => Self::AIndIdxDisp(NumOrLbl::Num(off), areg, D(dreg)),
-            None => Self::AIndDisp(NumOrLbl::Num(off), areg),
+            Some(dreg) => Self::AIndIdxDisp(off.into(), areg, D(dreg)),
+            None => Self::AIndDisp(off.into(), areg),
         }
     }
 }

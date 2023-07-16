@@ -44,13 +44,13 @@ pub fn compile_movs_iinstr(string_lbl: usize, to: Place, instrs: &mut Vec<ValidI
 }
 
 pub fn compile_push_iinstr(from: Place, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), String> {
-    // This if should use loop; That if can push in one instruction
-    let from_addr_mode: Either<((Imm, AReg, Option<DReg>), u32), (AddrMode, DataSize)>;
+    // `This` if should use loop; `That` if can push in one instruction
+    let from_addr_mode: Either<((NumOrLbl, AReg, Option<DReg>), u32), (AddrMode, DataSize)>;
     match from {
         Place::Var(field) => {
             if field.tt.is_array() || field.tt.is_struct() {
                 let addr_mode = fenv.var_as_addr_mode(field.name)?;
-                if let AddrMode::AIndDisp(Num(off), a) = addr_mode {
+                if let AddrMode::AIndDisp(off, a) = addr_mode {
                     let mut size = field.tt.get_size(env);
                     if size % 2 == 1 {
                         warn!("Type {} has odd size: {}", field.tt, size);
@@ -58,7 +58,7 @@ pub fn compile_push_iinstr(from: Place, instrs: &mut Vec<ValidInstruction>, fenv
                     }
                     from_addr_mode = This(((off, a, None), size));
                 } else {
-                    return Err(format!("`fenv.var_as_addr_mode()` is guaranteed to return `AIndDisp(Num, AReg)`, but it returned {:?}", addr_mode));
+                    return Err(format!("`fenv.var_as_addr_mode()` is guaranteed to return `AIndDisp(NumOrLbl, AReg)`, but it returned {:?}", addr_mode));
                 }
             } else if field.tt.is_void() {
                 return Ok(());
@@ -80,12 +80,12 @@ pub fn compile_push_iinstr(from: Place, instrs: &mut Vec<ValidInstruction>, fenv
                     warn!("Type {} has odd size: {}", tt, size);
                     size += 1;
                 }
-                from_addr_mode = This(((off, areg, dreg), size));
+                from_addr_mode = This(((off.into(), areg, dreg), size));
             } else if tt.is_void() {
                 return Ok(());
             } else {
                 // magic or pointer
-                from_addr_mode = That(((off, areg, dreg).into(), tt.get_data_size(env).unwrap()));
+                from_addr_mode = That(((Into::<NumOrLbl>::into(off), areg, dreg).into(), tt.get_data_size(env).unwrap()));
             }
         }
         Place::ATemp(atemp) => {

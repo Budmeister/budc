@@ -179,6 +179,7 @@ impl BudExpander {
         log_options: &LoggingOptions,
         tree: Node<bud::BudTerminal, bud::BudNonTerminal>,
     ) -> Result<Environment, String> {
+        // Get Items
         let children;
         if let Node::NonTm(bud::BudNonTerminal::Items, children_) = tree {
             children = children_;
@@ -191,6 +192,7 @@ impl BudExpander {
         }
         let items = bud::Item::news(&children)?;
 
+        // Separate items into funcs, structs, and imports
         let mut funcs = Vec::new();
         let mut func_names = Vec::new();
         let mut structs = Vec::new();
@@ -209,6 +211,7 @@ impl BudExpander {
             }
         }
 
+        // Find all used types and size them
         let built_in = Self::get_built_in_types();
         let (mut environment, funcs) = Environment::new(log_options, structs, built_in, funcs)?;
         
@@ -225,6 +228,8 @@ impl BudExpander {
         if log_options.print_inter_funcs {
             debug!("Funcs: {:?}", funcs.iter().map(|x| x.0.to_owned()).collect::<Vec<String>>());
         }
+
+        // Compile all funcs
         for (name, func) in funcs {
             match func.compile(log_options, &environment) {
                 Ok(cfunc) => environment.compiled_funcs.push(cfunc),
