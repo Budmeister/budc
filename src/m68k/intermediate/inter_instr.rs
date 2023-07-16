@@ -1,6 +1,8 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
+use std::rc::Rc;
+
 use crate::{m68k::*, bud::BudBinop};
 
 use super::place::*;
@@ -31,13 +33,13 @@ pub enum InterInstr {
 
     // Stack frame operations
     SMarker(StackMarker),                       // Marks a stack location for the FunctionInterEnvironment
+    Grs(RegisterSpaceLbl),                      // GetRegisterSpace - allocate space on the stack to save active regs
+    Save(RegisterSpaceLbl, Box<[ADTemp]>),       // Save all active regs by moving them to the given RegisterSpace
     Call(String, StackMarker),                  // Jsr to function, then move the SP to where it was when the StackMarker
-                                                // instruction was encountered and retrieve reg values from most recent Gsr
+                                                // instruction was encountered and retrieve reg values from most recent Grs
     Lbl(usize),
     Goto(usize),
     Rts,
-    Grs,                                        // GetRegisterSpace - allocate space on the stack to save active regs
-    Save,                                       // Save all active regs by moving them to the given RegisterSpace
 
     // Logic operations
     Tst(Place),

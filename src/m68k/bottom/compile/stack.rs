@@ -14,6 +14,7 @@ use Proxy::*;
 use DataSize::*;
 use NumOrLbl::Num;
 use ADReg::*;
+use AReg::SP;
 use Either::*;
 
 pub fn compile_mova_iinstr(name: String, to: Place, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), String> {
@@ -153,6 +154,36 @@ pub fn compile_pea_iinstr(atemp: ATemp, dtemp: Option<DTemp>, off: Imm, instrs: 
             .map(|dreg| dreg.0);
     let from = (off, areg, dreg).into();
     let instr = Pea(from).validate()?;
+    instrs.push(instr);
+    Ok(())
+}
+
+pub fn compile_smarker_iinstr(lbl: StackMarker, fenv: &mut FunctionEnvironment) {
+    fenv.add_smarker(lbl);
+}
+
+pub fn compile_grs_iinstr(rs_lbl: RegisterSpaceLbl, fenv: &mut FunctionEnvironment) {
+    fenv.add_rs_lbl(rs_lbl);
+}
+
+pub fn compile_save_iinstr(rs_lbl: RegisterSpaceLbl, temps: &[ADTemp], instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
+    // Assume we save all 4 bytes of all used regs, even if not all the bytes are being used
+    // This isn't necessary, but it would make the process way more complicated to think
+    // about varying-sized regs
+    let size = LWord;
+    let adbf = fenv.temps_to_adbitfield(temps, Some(rs_lbl))?;
+    fenv.set_rs(rs_lbl, adbf)?;
+    let to = fenv.get_rs_addr_mode(rs_lbl)?;
+    let instr = MoveMRtoM(size, adbf, to).validate()?;
+    instrs.push(instr);
+    Ok(())
+}
+
+pub fn compile_call_iinstr(name: String, smarker_lbl: StackMarker, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
+    let instr = Jsr(name).validate()?;
+    instrs.push(instr);
+    let smarker_addr = fenv.move_esh_to_smarker(smarker_lbl)?;
+    let instr = Lea(smarker_addr, SP).validate()?;
     instrs.push(instr);
     Ok(())
 }

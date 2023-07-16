@@ -126,6 +126,7 @@ pub enum NumOrLbl {
     Num(Imm),
     NamedLbl(String),
     Lbl(usize),
+    Sum(UncalculatedStackHeight),
 }
 impl std::fmt::Display for NumOrLbl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -133,12 +134,33 @@ impl std::fmt::Display for NumOrLbl {
             Self::Num(num) => write!(f, "{}", num),
             Self::NamedLbl(lbl) => write!(f, "{}", lbl),
             Self::Lbl(lbl) => write!(f, "{}", lbl),
+            Self::Sum(ush) => write!(f, "{:?}", ush),
         }
     }
 }
 impl std::fmt::Debug for NumOrLbl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self)
+    }
+}
+impl From<Imm> for NumOrLbl {
+    fn from(value: Imm) -> Self {
+        Self::Num(value)
+    }
+}
+impl From<String> for NumOrLbl {
+    fn from(value: String) -> Self {
+        Self::NamedLbl(value)
+    }
+}
+impl From<usize> for NumOrLbl {
+    fn from(value: usize) -> Self {
+        Self::Lbl(value)
+    }
+}
+impl From<UncalculatedStackHeight> for NumOrLbl {
+    fn from(value: UncalculatedStackHeight) -> Self {
+        Self::Sum(value)
     }
 }
 
@@ -275,6 +297,26 @@ impl ADBitField {
             sp: regs.contains(&A(SP)),
         }
     }
+    pub fn rs_size(&self) -> RegisterSpaceSize {
+        let mut size = 0;
+        if self.d0 { size += 4; }
+        if self.d1 { size += 4; }
+        if self.d2 { size += 4; }
+        if self.d3 { size += 4; }
+        if self.d4 { size += 4; }
+        if self.d5 { size += 4; }
+        if self.d6 { size += 4; }
+        if self.d7 { size += 4; }
+        if self.a0 { size += 4; }
+        if self.a1 { size += 4; }
+        if self.a2 { size += 4; }
+        if self.a3 { size += 4; }
+        if self.a4 { size += 4; }
+        if self.a5 { size += 4; }
+        if self.a6 { size += 4; }
+        if self.sp { size += 4; }
+        size
+    }
 }
 impl std::fmt::Display for ADBitField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -315,6 +357,8 @@ pub struct Valid;
 pub struct Unchecked;
 
 use Instruction::*;
+
+use super::{UncalculatedStackHeight, RegisterSpaceSize};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct ValidInstruction(Instruction);
@@ -367,6 +411,9 @@ pub enum Instruction {
     Roxr(DataSize, Option<AddrMode>, AddrMode),
     Swap(DReg),
 
+    AndiCCR(u8),
+    OriCCR(u8),
+
     // Control
     Stop,
     Nop,
@@ -375,10 +422,13 @@ pub enum Instruction {
     Rte,
     Rts,
     Lbl(usize),
+    Jmp(usize),
     // General
     Bra(usize),
     Beq(usize),
     Bne(usize),
+    Bcc(usize),
+    Bcs(usize),
     // Signed
     Bge(usize), // greater or equal
     Bgt(usize), // greater than
@@ -392,6 +442,7 @@ pub enum Instruction {
     Bls(usize), // lower or same
     Blo(usize), // lower
 
+    Chk(AddrMode, DReg),
     Trap(u32),
     Trapv(u32),
     Link(i16, AReg),
@@ -639,6 +690,23 @@ impl Instruction {
                 *src = new_src;
                 Ok(ValidInstruction(self))
             }
+            Chk(bound, _) => {
+                match bound {
+                    AddrMode::D(_) => {},
+                    AddrMode::AInd(_) => {},
+                    AddrMode::AIndInc(_) => {},
+                    AddrMode::AIndDec(_) => {},
+                    AddrMode::AIndDisp(_, _) => {},
+                    AddrMode::AIndIdxDisp(_, _, _) => {},
+                    AddrMode::AbsW(_) => {},
+                    AddrMode::AbsL(_) => {},
+                    AddrMode::Imm(_) => {},
+                    _ => {
+                        return Err(format!("Illegal addressing mode: {:?}", self));
+                    }
+                }
+                Ok(ValidInstruction(self))
+            }
             Trap(trap) | Trapv(trap) => {
                 if *trap >= 16 {
                     return Err(format!("Illegal trap vector: {:?}", self));
@@ -661,6 +729,8 @@ impl Instruction {
 
             Cmp(_, _, _)
             | Swap(_)
+            | AndiCCR(_)
+            | OriCCR(_)
             | Stop
             | Reset
             | Nop
@@ -672,9 +742,12 @@ impl Instruction {
             | ExtW(_)
             | ExtL(_)
             | Lbl(_)
+            | Jmp(_)
             | Bra(_)
             | Beq(_)
             | Bne(_)
+            | Bcc(_)
+            | Bcs(_)
             | Bge(_)
             | Bgt(_)
             | Ble(_)

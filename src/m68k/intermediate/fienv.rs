@@ -14,7 +14,7 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use std::ops::RangeFrom;
+use std::{ops::RangeFrom, rc::Rc, collections::HashSet};
 
 use crate::m68k::*;
 
@@ -168,6 +168,20 @@ impl FunctionInterEnvironment {
             self.cleanup_label = Some(label);
             label
         }
+    }
+    pub fn get_active_temps(&self) -> Box<[ADTemp]> {
+        let mut temps = Vec::new();
+        for (atemp, active) in self.atemps.iter().enumerate() {
+            if *active {
+                temps.push(ADTemp::A(atemp));
+            }
+        }
+        for (dtemp, active) in self.dtemps.iter().enumerate() {
+            if *active {
+                temps.push(ADTemp::D(dtemp));
+            }
+        }
+        temps.into_boxed_slice()
     }
     pub fn ret(&mut self, place: Place, instrs: &mut Vec<InterInstr>, env: &Environment) -> Result<(), String> {
         let tt = place.get_type();

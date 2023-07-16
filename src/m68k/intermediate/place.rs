@@ -21,6 +21,11 @@ use log::*;
 
 pub type ATemp = usize;
 pub type DTemp = usize;
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum ADTemp {
+    A(ATemp),
+    D(DTemp),
+}
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub enum Place {

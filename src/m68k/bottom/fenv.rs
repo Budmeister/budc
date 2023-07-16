@@ -11,7 +11,7 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use std::{collections::{HashMap, HashSet}, ops::RangeFrom};
+use std::{collections::{HashMap, HashSet}, ops::{RangeFrom, Sub, Add}};
 
 use Proxy::*;
 
@@ -47,12 +47,97 @@ type Proxied = (DReg, bool);
 /// changes to the AReg do not affect the original Place
 type ProxiedAddr = (AReg, bool);
 
+/// Represents a relative stack index (usually positive but can be negative)
+pub type StackHeight = i32;
+/// Represents a stack height that needs to be calculated by adding together the
+/// sizes of the given register spaces. This is usually used when RegisterSpaceSizes
+/// have not been calculated yet.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct UncalculatedStackHeight {
+    pub known: StackHeight,
+    pub reg_spaces: Vec<RegisterSpaceLbl>,
+    pub neg_reg_spaces: Vec<RegisterSpaceLbl>,
+}
+/// Represents a label for a RegisterSpace
+pub type RegisterSpaceLbl = usize;
+/// Represents the size of a register space
+pub type RegisterSpaceSize = i32;
+
+impl Sub<&UncalculatedStackHeight> for UncalculatedStackHeight {
+    type Output = UncalculatedStackHeight;
+
+    fn sub(self, rhs: &UncalculatedStackHeight) -> Self::Output {
+        let new_known = self.known - rhs.known;
+        let rhs_spaces: HashSet<RegisterSpaceLbl> = rhs.reg_spaces.iter().cloned().collect();
+        let rhs_neg_spaces: HashSet<RegisterSpaceLbl> = rhs.neg_reg_spaces.iter().cloned().collect();
+        let lhs_spaces: HashSet<RegisterSpaceLbl> = self.reg_spaces.iter().cloned().collect();
+        let lhs_neg_spaces: HashSet<RegisterSpaceLbl> = self.neg_reg_spaces.iter().cloned().collect();
+        let all = self.reg_spaces.into_iter()
+                .chain(
+                    self.neg_reg_spaces.into_iter()
+                            .chain(
+                                rhs.reg_spaces.iter().cloned()
+                                        .chain(
+                                            rhs.neg_reg_spaces.iter().cloned()
+                                        )
+                            )
+                );
+        let mut new_spaces = Vec::new();
+        let mut new_neg_spaces = Vec::new();
+        for space in all {
+            let mut count = 0;
+            if lhs_spaces.contains(&space) {
+                count += 1;
+            }
+            if lhs_neg_spaces.contains(&space) {
+                count -=1 ;
+            }
+            if rhs_spaces.contains(&space) {
+                count -= 1;
+            }
+            if rhs_neg_spaces.contains(&space) {
+                count +=1;
+            }
+            if count > 0 {
+                new_spaces.push(space);
+            } else if count < 0 {
+                new_neg_spaces.push(space);
+            }
+        }
+        UncalculatedStackHeight { known: new_known, reg_spaces: new_spaces, neg_reg_spaces: new_neg_spaces }
+    }
+}
+impl Add<StackHeight> for UncalculatedStackHeight {
+    type Output = UncalculatedStackHeight;
+
+    fn add(self, rhs: StackHeight) -> Self::Output {
+        UncalculatedStackHeight {
+            known: self.known + rhs,
+            reg_spaces: self.reg_spaces,
+            neg_reg_spaces: self.neg_reg_spaces,
+        }
+    }
+}
+impl Sub<StackHeight> for UncalculatedStackHeight {
+    type Output = UncalculatedStackHeight;
+
+    fn sub(self, rhs: StackHeight) -> Self::Output {
+        UncalculatedStackHeight {
+            known: self.known - rhs,
+            reg_spaces: self.reg_spaces,
+            neg_reg_spaces: self.neg_reg_spaces,
+        }
+    }
+}
+
 pub struct FunctionEnvironment {
     pub lit_strings: Vec<(usize, String)>,
     pub vars: Vec<Field>,
     dtemp_map: HashMap<DTemp, Option<DReg>>,
     atemp_map: HashMap<ATemp, Option<AReg>>,
-    extra_stack_height: usize,
+    smarker_map: HashMap<usize, UncalculatedStackHeight>,
+    rs_map: HashMap<usize, (UncalculatedStackHeight, Option<ADBitField>)>,
+    stack_height: UncalculatedStackHeight,
     stack_frame: HashMap<StackItem, i32>,
     label_gen: RangeFrom<usize>,
 }
@@ -73,8 +158,10 @@ impl FunctionEnvironment {
             vars,
             dtemp_map,
             atemp_map,
+            smarker_map: HashMap::new(),
+            rs_map: HashMap::new(),
             label_gen,
-            extra_stack_height: 0,
+            stack_height: UncalculatedStackHeight { known: 0, reg_spaces: Vec::new(), neg_reg_spaces: Vec::new() },
             stack_frame,
         }
     }
@@ -207,27 +294,164 @@ impl FunctionEnvironment {
             }
         }
     }
-    /// The returned AddrMode is always live. It will alwyas be AIndDisp
+    /// The returned AddrMode is always live. It will always be AIndDisp
     pub fn stack_item_to_addr_mode(&self, stack_item: StackItem) -> Result<AddrMode, String> {
         match stack_item.clone() {
             StackItem::Var(name) => match self.stack_frame.get(&stack_item) {
-                Some(stack_diff) => Ok(AddrMode::AIndDisp(NumOrLbl::Num(*stack_diff), SP)),
+                Some(stack_diff) => Ok(AddrMode::AIndDisp(self.calculate_stack_height_if_possible(&(self.stack_height.clone() + *stack_diff)), SP)),
                 None => Err(format!("Unrecognized variable {}", name)),
             },
             StackItem::DTemp(dtemp) => match self.dtemp_map.get(&dtemp) {
                 Some(Some(dreg)) => Ok((*dreg).into()),
                 _ => match self.stack_frame.get(&stack_item) {
-                    Some(stack_diff) => Ok(AddrMode::AIndDisp(NumOrLbl::Num(*stack_diff), SP)),
+                    Some(stack_diff) => Ok(AddrMode::AIndDisp(self.calculate_stack_height_if_possible(&(self.stack_height.clone() + *stack_diff)), SP)),
                     None => Err(format!("DTemp {} not in dtemp_map or stack_frame", dtemp)),
                 },
             },
             StackItem::ATemp(atemp) => match self.atemp_map.get(&atemp) {
                 Some(Some(areg)) => Ok((*areg).into()),
                 _ => match self.stack_frame.get(&stack_item) {
-                    Some(stack_diff) => Ok(AddrMode::AIndDisp(NumOrLbl::Num(*stack_diff), SP)),
+                    Some(stack_diff) => Ok(AddrMode::AIndDisp(self.calculate_stack_height_if_possible(&(self.stack_height.clone() + *stack_diff)), SP)),
                     None => Err(format!("ATemp {} not in atemp_map or stack_frame", atemp)),
                 },
             },
+        }
+    }
+    pub fn add_smarker(&mut self, smarker_lbl: usize) {
+        self.smarker_map.insert(smarker_lbl, self.stack_height.clone());
+    }
+    /// Moves the Extra Stack Height (self.stack_height) to point to the given SMarker
+    /// and returns a pointer to that SMarker as an AddrMode. The SP can then be changed
+    /// to point to that SMarker using `Lea(smarker_addr, SP)`
+    pub fn move_esh_to_smarker(&mut self, smarker_lbl: usize) -> Result<AddrMode, String> {
+        let diff = self.get_smarker_diff(smarker_lbl)?;
+        self.stack_height = self.get_smarker(smarker_lbl)?.clone();
+        Ok(AddrMode::AIndDisp(diff.into(), SP))
+    }
+    fn get_smarker_diff(&self, smarker_lbl: usize) -> Result<UncalculatedStackHeight, String> {
+        let diff = self.get_smarker(smarker_lbl)?.clone() - &self.stack_height;
+        Ok(diff)
+    }
+    fn get_smarker(&self, smarker_lbl: usize) -> Result<&UncalculatedStackHeight, String> {
+        match self.smarker_map.get(&smarker_lbl) {
+            Some(stack_height) => Ok(stack_height),
+            None => Err(format!("SMarker {} doesn't exist", smarker_lbl)),
+        }
+    }
+    pub fn add_rs_lbl(&mut self, rs_lbl: RegisterSpaceLbl) {
+        self.rs_map.insert(rs_lbl, (self.stack_height.clone(), None));
+        self.stack_height.reg_spaces.push(rs_lbl);
+    }
+    pub fn set_rs(&mut self, rs_lbl: RegisterSpaceLbl, adbf: ADBitField) -> Result<(), String> {
+        match self.rs_map.get_mut(&rs_lbl) {
+            Some((_, regs)) => {
+                *regs = Some(adbf);
+                Ok(())
+            }
+            None => Err(format!("RegisterSpace {} doesn't exist", rs_lbl))
+        }
+    }
+    pub fn get_rs_regs(&self, rs_lbl: RegisterSpaceLbl) -> Result<Option<ADBitField>, String> {
+        match self.rs_map.get(&rs_lbl) {
+            Some((_, regs)) => Ok(*regs),
+            None => Err(format!("RegisterSpace {} doesn't exist", rs_lbl)),
+        }
+    }
+    pub fn get_rs_height(&self, rs_lbl: RegisterSpaceLbl) -> Result<UncalculatedStackHeight, String> {
+        match self.rs_map.get(&rs_lbl) {
+            Some((height, _)) => Ok(height.clone()),
+            None => Err(format!("RegisterSpace {} doesn't exist", rs_lbl))
+        }
+    }
+    pub fn get_rs_addr_mode(&self, rs_lbl: RegisterSpaceLbl) -> Result<AddrMode, String> {
+        let height = self.get_rs_height(rs_lbl)?;
+        let stack_diff: NumOrLbl = height.into();
+        let addr_mode = AddrMode::AIndDisp(stack_diff, SP);
+        Ok(addr_mode)
+    }
+    pub fn temps_to_adbitfield(&self, temps: &[ADTemp], rs_lbl: Option<RegisterSpaceLbl>) -> Result<ADBitField, String> {
+        // There should be no instrs added to dummy_instrs because it should only be passed
+        // in where no instrs are needed
+        let mut dummy_instrs = Vec::new();
+        let n = Proxy1;
+        let adbf = ADBitField::new(&temps
+            .iter()
+            .filter_map(|temp| {
+                match temp {
+                    ADTemp::A(atemp) => {
+                        if self.atemp_is_areg(*atemp) {
+                            // This is Rust like I've never seen!
+                            Some((|| Ok(A(self.atemp_as_areg(*atemp, &mut dummy_instrs, n)?.0)))())
+                        } else {
+                            None
+                        }
+                    }
+                    ADTemp::D(dtemp) => {
+                        if self.dtemp_is_dreg(*dtemp) {
+                            Some((|| Ok(D(self.dtemp_as_dreg(*dtemp, &mut dummy_instrs, n)?.0)))())
+                        } else {
+                            None
+                        }
+                    }
+                }
+            })
+            .collect::<Result<Vec<ADReg>, String>>()?
+        );
+        if !dummy_instrs.is_empty() {
+            match rs_lbl {
+                Some(rs_lbl) => return Err(format!("Trying to save temps that aren't in regs (during saving to rs {}): {:?}", rs_lbl, temps)),
+                None => return Err(format!("Trying to save temps that aren't in regs: {:?}", temps)),
+            }
+        }
+        Ok(adbf)
+    }
+    pub fn calculate_stack_height_if_possible(&self, ush: &UncalculatedStackHeight) -> NumOrLbl {
+        if let Ok(Some(sh)) = self.calculate_stack_height(ush) {
+            sh.into()
+        } else {
+            ush.clone().into()
+        }
+    }
+    /// Returns Err if at least one of the rs_lbls don't exist.
+    /// 
+    /// Returns Ok(None) if at least one of the rs_lbls exist but haven't been given a size yet.
+    /// 
+    /// Returns Ok(Some) if all the rs_lbls exist and have been given a size
+    pub fn calculate_current_stack_height(&self) -> Result<Option<StackHeight>, String> {
+        self.calculate_stack_height(&self.stack_height)
+    }
+    /// Returns Err if at least one of the rs_lbls don't exist.
+    /// 
+    /// Returns Ok(None) if at least one of the rs_lbls exist but haven't been given a size yet.
+    /// 
+    /// Returns Ok(Some) if all the rs_lbls exist and have been given a size
+    pub fn calculate_stack_height(&self, ush: &UncalculatedStackHeight) -> Result<Option<StackHeight>, String> {
+        let mut sh = ush.known;
+        for rs_lbl in &ush.reg_spaces {
+            match self.get_rs_size(*rs_lbl) {
+                Err(msg) => return Err(msg),
+                Ok(None) => return Ok(None),
+                Ok(Some(size)) => sh += size,
+            }
+        }
+        for rs_lbl in &ush.neg_reg_spaces {
+            match self.get_rs_size(*rs_lbl) {
+                Err(msg) => return Err(msg),
+                Ok(None) => return Ok(None),
+                Ok(Some(size)) => sh -= size,
+            }
+        }
+        Ok(Some(sh))
+    }
+    /// Returns Err if the rs_lbl doesn't exist.
+    /// 
+    /// Returns Ok(None) if the rs_lbl exists but hasn't been given a size yet.
+    /// 
+    /// Returns Ok(Some) if the rs_lbl exists and has been given a size.
+    pub fn get_rs_size(&self, rs_lbl: RegisterSpaceLbl) -> Result<Option<RegisterSpaceSize>, String> {
+        match self.rs_map.get(&rs_lbl) {
+            Some((_, regs)) => Ok(regs.map(|adbf| adbf.rs_size())),
+            None => Err(format!("RSLabel {} doesn't exist", rs_lbl)),
         }
     }
     /// Returns true precicely when a call to `place_to_dreg` would return a live DReg.
@@ -421,6 +645,12 @@ impl FunctionEnvironment {
             }
         }
     }
+    pub fn atemp_is_areg(
+        &self,
+        atemp: ATemp,
+    ) -> bool {
+        self.atemp_map.get(&atemp).unwrap().is_some()
+    }
     pub fn dtemp_as_dreg(
         &self,
         dtemp: DTemp,
@@ -439,6 +669,12 @@ impl FunctionEnvironment {
                 Ok((proxy, false))
             }
         }
+    }
+    pub fn dtemp_is_dreg(
+        &self,
+        dtemp: DTemp,
+    ) -> bool {
+        self.dtemp_map.get(&dtemp).unwrap().is_some()
     }
     pub fn get_new_label(&mut self) -> usize {
         self.label_gen.next().unwrap()

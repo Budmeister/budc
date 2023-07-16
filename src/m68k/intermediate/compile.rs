@@ -693,7 +693,8 @@ pub fn call_func(id: String, offsets: Vec<Expr>, instrs: &mut Vec<InterInstr>, f
             // Get register space so that after the args have been pushed 
             // to the stack, active regs can be saved before the function
             // call
-            let instr = InterInstr::Grs;
+            let rs_lbl = fienv.get_new_label();
+            let instr = InterInstr::Grs(rs_lbl);
             instrs.push(instr);
             // Maybe I should use a separate number generator in fienv for
             // StackMarkers, but I'm lazy
@@ -711,7 +712,7 @@ pub fn call_func(id: String, offsets: Vec<Expr>, instrs: &mut Vec<InterInstr>, f
                 let plan = ReturnPlan::Push(tt);
                 compile_expr(offset, plan, instrs, fienv, env)?;
             }
-            let instr = InterInstr::Save;
+            let instr = InterInstr::Save(rs_lbl, fienv.get_active_temps());
             instrs.push(instr);
             let instr = InterInstr::Call(id.clone(), marker);
             instrs.push(instr);

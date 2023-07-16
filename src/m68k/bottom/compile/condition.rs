@@ -6,7 +6,7 @@
 use crate::m68k::*;
 
 use Instruction::*;
-use NumOrLbl::{Num};
+use NumOrLbl::Num;
 use AddrMode::*;
 use super::super::fenv::Proxy::*;
 
@@ -127,5 +127,24 @@ pub fn cc_to_le(size: DataSize, dest: AddrMode, instrs: &mut Vec<ValidInstructio
         Lbl(e_label).validate()?,
     ];
     instrs.append(&mut instr);
+    Ok(())
+}
+
+pub fn compile_chk_iinstr(atemp: ATemp, dtemp: Option<DTemp>, off: inter_instr::Imm, to: DTemp, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
+    let areg = fenv.atemp_as_areg(atemp, instrs, Proxy1)?.0;
+    let dreg = fenv.opt_dtemp_as_opt_dreg(dtemp, instrs, Proxy1)?
+            .map(|dreg| dreg.0);
+    let from = (off, areg, dreg).into();
+    let to = fenv.dtemp_as_dreg(to, instrs, Proxy2)?.0;
+    let instr = Chk(from, to).validate()?;
+    instrs.push(instr);
+    Ok(())
+}
+
+pub fn compile_chki_iinstr(len: inter_instr::Imm, to: DTemp, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
+    let to = fenv.dtemp_as_dreg(to, instrs, Proxy1)?.0;
+    let from = len.into();
+    let instr = Chk(from, to).validate()?;
+    instrs.push(instr);
     Ok(())
 }

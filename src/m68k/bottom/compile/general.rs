@@ -13,6 +13,9 @@ use binop::compile_binop_iinstr;
 use binopi::compile_binopi_iinstr;
 use data::*;
 use stack::*;
+use condition::*;
+use control::*;
+use logic::*;
 
 use Instruction::*;
 use DReg::*;
@@ -119,8 +122,8 @@ fn get_temp_maps(
             InterInstr::Lbl(_) => {}
             InterInstr::Goto(_) => {}
             InterInstr::Rts => {}
-            InterInstr::Grs => {}
-            InterInstr::Save => {}
+            InterInstr::Grs(_) => {}
+            InterInstr::Save(_, _) => {}
             InterInstr::PuVA(_) => {}
             InterInstr::Pusi(_, _) => {}
             InterInstr::Puss(_) => {}
@@ -243,28 +246,28 @@ pub fn compile_iinstr(
         InterInstr::Pusi(imm, size) => compile_pusi_iinstr(imm, size, instrs),
         InterInstr::Puss(string_lbl) => compile_puss_iinstr(string_lbl, instrs),
         InterInstr::Pea(atemp, dtemp, off) => compile_pea_iinstr(atemp, dtemp, off, instrs, fenv),
-        InterInstr::Chk(_, _, _, _) => todo!(),
-        InterInstr::Chki(_, _) => todo!(),
-        InterInstr::SMarker(_) => todo!(),
-        InterInstr::Call(_, _) => todo!(),
-        InterInstr::Lbl(_) => todo!(),
-        InterInstr::Goto(_) => todo!(),
-        InterInstr::Rts => todo!(),
-        InterInstr::Grs => todo!(),
-        InterInstr::Save => todo!(),
-        InterInstr::Tst(_) => todo!(),
-        InterInstr::Tsti(_) => todo!(),
-        InterInstr::Bcc(_) => todo!(),
-        InterInstr::Bcs(_) => todo!(),
-        InterInstr::Beq(_) => todo!(),
-        InterInstr::Bge(_) => todo!(),
-        InterInstr::Bgt(_) => todo!(),
-        InterInstr::Ble(_) => todo!(),
-        InterInstr::Blt(_) => todo!(),
-        InterInstr::Bmi(_) => todo!(),
-        InterInstr::Bne(_) => todo!(),
-        InterInstr::Bpl(_) => todo!(),
-        InterInstr::Bra(_) => todo!(),
+        InterInstr::Chk(atemp, dtemp, off, to) => compile_chk_iinstr(atemp, dtemp, off, to, instrs, fenv),
+        InterInstr::Chki(len, to) => compile_chki_iinstr(len as Imm, to, instrs, fenv),
+        InterInstr::SMarker(lbl) => { compile_smarker_iinstr(lbl, fenv); Ok(()) },
+        InterInstr::Grs(rs_lbl) => { compile_grs_iinstr(rs_lbl, fenv); Ok(()) },
+        InterInstr::Save(rs_lbl, temps) => compile_save_iinstr(rs_lbl, &temps, instrs, fenv),
+        InterInstr::Call(name, smarker_lbk) => compile_call_iinstr(name, smarker_lbk, instrs, fenv),
+        InterInstr::Lbl(lbl) => compile_lbl_iinstr(lbl, instrs),
+        InterInstr::Goto(lbl) => compile_goto_iinstr(lbl, instrs),
+        InterInstr::Rts => compile_rts_iinstr(instrs),
+        InterInstr::Tst(from) => compile_tst_iinstr(from, instrs, fenv, env),
+        InterInstr::Tsti(from) => compile_tsti_iinstr(from, instrs),
+        InterInstr::Bcc(lbl) => compile_bcc_iinstr(lbl, instrs),
+        InterInstr::Bcs(lbl) => compile_bcs_iinstr(lbl, instrs),
+        InterInstr::Beq(lbl) => compile_beq_iinstr(lbl, instrs),
+        InterInstr::Bge(lbl) => compile_bge_iinstr(lbl, instrs),
+        InterInstr::Bgt(lbl) => compile_bgt_iinstr(lbl, instrs),
+        InterInstr::Ble(lbl) => compile_ble_iinstr(lbl, instrs),
+        InterInstr::Blt(lbl) => compile_blt_iinstr(lbl, instrs),
+        InterInstr::Bmi(lbl) => compile_bmi_iinstr(lbl, instrs),
+        InterInstr::Bne(lbl) => compile_bne_iinstr(lbl, instrs),
+        InterInstr::Bpl(lbl) => compile_bpl_iinstr(lbl, instrs),
+        InterInstr::Bra(lbl) => compile_bra_iinstr(lbl, instrs),
     }
 }
 
