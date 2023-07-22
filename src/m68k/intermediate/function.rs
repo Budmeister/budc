@@ -4,7 +4,7 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use crate::{m68k::*, bud::*, logging::LoggingOptions};
+use crate::{m68k::*, bud::*, error::*, logging::LoggingOptions};
 
 use super::{return_plan::ReturnPlan, inter_instr::InterInstr, fienv::FunctionInterEnvironment, place::Place};
 
@@ -16,7 +16,7 @@ impl Function {
     }
 }
 
-pub fn get_inter_instrs(expr: Expr, signature: &Signature, log_options: &LoggingOptions, env: &Environment) -> Result<(Vec<InterInstr>, FunctionInterEnvironment), String> {
+pub fn get_inter_instrs(expr: Expr, signature: &Signature, log_options: &LoggingOptions, env: &Environment) -> Result<(Vec<InterInstr>, FunctionInterEnvironment), BudErr> {
     let mut instrs = Vec::new();
     let mut fienv = FunctionInterEnvironment::new(signature.clone());
     let plan;

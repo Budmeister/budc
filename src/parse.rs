@@ -3,7 +3,7 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use crate::{grammar::*, logging::LoggingOptions};
+use crate::{grammar::*, logging::LoggingOptions, error::*};
 use colored::Colorize;
 use logos::{Lexer, Logos};
 use log::{debug, error};
@@ -14,14 +14,22 @@ use std::{
 
 #[derive(Clone)]
 pub enum Node<T, N> {
-    Tm(T),
-    NonTm(N, Vec<Node<T, N>>),
+    Tm{ t: T, range: Range<usize> },
+    NonTm{ n: N, children: Vec<Node<T, N>>, range: Range<usize> },
+}
+impl<T, N> Ranged for Node<T, N> {
+    fn get_range(&self) -> Range<usize> {
+        match self {
+            Self::Tm { t: _, range } => *range,
+            Self::NonTm { n: _, children: _, range } => *range,
+        }
+    }
 }
 impl<T: Display, N: Display> Display for Node<T, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Tm(t) => write!(f, "{}", t),
-            Self::NonTm(n, _) => write!(f, "{}", n),
+            Self::Tm{ t, range } => write!(f, "{} @ {:?}", t, range),
+            Self::NonTm{ n, children: _, range } => write!(f, "{} @ {:?}", n, range),
         }
     }
 }
@@ -75,7 +83,7 @@ where
                 }
             }
             children.reverse();
-            let node = Node::NonTm(n.clone(), children);
+            let node = Node::NonTm{ n: n.clone(), children, range: slice_location };
             node_stack.push(node);
             // Goto new state
             state_num = *state_stack.last().unwrap();
@@ -104,7 +112,7 @@ where
                 debug!("Shifting state {} onto the stack", next_state);
             }
             state_stack.push(*next_state);
-            let node = Node::Tm(load_data(tok, slice));
+            let node = Node::Tm{ t: load_data(tok, slice), range: slice_location };
             node_stack.push(node);
             if log_options.print_actions {
                 debug!("Stack: {:?}", state_stack);
@@ -291,10 +299,10 @@ fn get_indent(indent: i32) -> String {
 
 pub fn print_tree_visitor<T: Display, N: Display>(node: &Node<T, N>, indent: i32) {
     match node {
-        Node::Tm(t) => {
+        Node::Tm{ t, range: _ } => {
             print!("\"{}\"", t);
         },
-        Node::NonTm(n, children) => {
+        Node::NonTm{ n, children, range: _ } => {
             let indent_str = get_indent(indent);
             let plus_1 = get_indent(indent + DEFAULT_INDENT);
             println!("\"{}\" {{", n);

@@ -1,14 +1,16 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
+use std::ops::Range;
+
 use log::*;
 
-use crate::{m68k::*, bud::*};
+use crate::{m68k::*, bud::*, error::*, u_err, c_err};
 
 use super::{return_plan::ReturnPlan, inter_instr::{InterInstr, Imm}, fienv::FunctionInterEnvironment, place::Place};
 
 
-pub fn compile_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     compile_bin_expr(*expr.bin_expr,
         if expr.with_semicolon {
             ReturnPlan::None
@@ -18,9 +20,9 @@ pub fn compile_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, 
         instrs, fienv, env)?;
     Ok(())
 }
-pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     match be {
-        BinExpr::Binary(nbe, b, be) => {
+        BinExpr::Binary(nbe, b, be, range) => {
             let retreg = Place::DTemp(0, fienv.return_type());
             match (plan, fienv.return_type().is_array() || fienv.return_type().is_struct(), retreg) {
                 (ReturnPlan::Binop(pb, place), _, _) => {
@@ -28,7 +30,7 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
                     // As a future optimization, we do not need to get a new place if
                     // both binops are the same and if the binop is associative
                     let tt = place.get_type();
-                    let dtemp = fienv.get_data_temp(tt.clone())?;
+                    let dtemp = fienv.get_data_temp(tt.clone(), Some(nbe.get_range()))?;
                     let d_place = Place::DTemp(dtemp, tt);
                     let plan = ReturnPlan::Move(d_place.clone());
                     compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
@@ -45,9 +47,9 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
                 (ReturnPlan::Condition, _, _) => {
                     let preference = nbe.type_preference(fienv, env)?;
                     if !preference.is_magic(env) {
-                        return Err(format!("Cannot read type {} as a condition, because it is not magic", preference));
+                        return u_err!(nbe.get_range(), "Cannot read type {} as a condition, because it is not magic", preference);
                     }
-                    let dtemp = fienv.get_data_temp(preference.clone())?;
+                    let dtemp = fienv.get_data_temp(preference.clone(), Some(nbe.get_range()))?;
                     let d_place = Place::DTemp(dtemp, preference);
                     let plan = ReturnPlan::Move(d_place.clone());
                     compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
@@ -57,10 +59,10 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
                     d_place.free(fienv);
                 }
                 (ReturnPlan::Return, true, _) => {
-                    return Err(format!("Cannot return array or struct type `{}` from binary expression {}", fienv.return_type(), b));
+                    return u_err!(range, "Cannot return array or struct type `{}` from binary expression {}", fienv.return_type(), b);
                 }
                 (ReturnPlan::Push(tt), _, _) => {
-                    let dtemp = fienv.get_data_temp(tt.clone())?;
+                    let dtemp = fienv.get_data_temp(tt.clone(), Some(nbe.get_range()))?;
                     let d_place = Place::DTemp(dtemp, tt);
                     let plan = ReturnPlan::Move(d_place.clone());
                     compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
@@ -77,54 +79,54 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
             }
 
         },
-        BinExpr::NonBin(nbe) => {
+        BinExpr::NonBin(nbe, _) => {
             compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
         },
     }
     Ok(())
 }
-pub fn compile_non_bin_expr(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_non_bin_expr(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     match nbe {
-        NonBinExpr::BlockExpr(exprs)        => compile_block_expr(exprs, plan, instrs, fienv, env),
-        NonBinExpr::AssignExpr(id, expr)    => compile_assign_expr(*id, *expr, plan, instrs, fienv, env),
-        NonBinExpr::VarDeclAssgn(vd, expr)  => compile_var_decl_assign(*vd, *expr, plan, instrs, fienv, env),
-        NonBinExpr::ReturnExpr(expr)       => compile_return_expr(expr.map(|x| *x), plan, instrs, fienv, env),
-        NonBinExpr::CleanupCall         => compile_cleanup_call(plan, instrs, fienv, env),
-        NonBinExpr::CleanupExpr(expr)      => compile_cleanup_expr(*expr, plan, instrs, fienv, env),
-        NonBinExpr::IdExpr(id)           => compile_id_expr(*id, plan, instrs, fienv, env),
-        NonBinExpr::LitExpr(lit)          => compile_lit_expr(lit, plan, instrs, fienv, env),
-        NonBinExpr::ParenExpr(expr)        => compile_paren_expr(*expr, plan, instrs, fienv, env),
-        NonBinExpr::UnaryExpr(un, expr)     => compile_unary_expr(un, *expr, plan, instrs, fienv, env),
-        NonBinExpr::IfExpr(cond, expr)        => compile_if_expr(*cond, *expr, plan, instrs, fienv, env),
-        NonBinExpr::IfElse(cond, expr1, expr2)     => compile_if_else(*cond, *expr1, *expr2, plan, instrs, fienv, env),
-        NonBinExpr::UnlExpr(cond, expr)       => compile_unless_expr(*cond, *expr, plan, instrs, fienv, env),
-        NonBinExpr::UnlElse(cond, expr1, expr2)    => compile_unless_else(*cond, *expr1, *expr2, plan, instrs, fienv, env),
-        NonBinExpr::WhileExpr(cond, expr)     => compile_while_expr(*cond, *expr, plan, instrs, fienv, env),
-        NonBinExpr::DoWhile(expr, cond)       => compile_do_while(*cond, *expr, plan, instrs, fienv, env),
-        NonBinExpr::Break               => compile_break(plan, instrs, fienv, env),
-        NonBinExpr::Continue            => compile_continue(plan, instrs, fienv, env),
+        NonBinExpr::BlockExpr(exprs, range)                                                    => compile_block_expr(exprs, range, plan, instrs, fienv, env),
+        NonBinExpr::AssignExpr(id, expr, _)                                                => compile_assign_expr(*id, *expr, plan, instrs, fienv, env),
+        NonBinExpr::VarDeclAssgn(vd, expr, _)                                              => compile_var_decl_assign(*vd, *expr, plan, instrs, fienv, env),
+        NonBinExpr::ReturnExpr(expr, range)                                                => compile_return_expr(expr.map(|x| *x), range, plan, instrs, fienv, env),
+        NonBinExpr::CleanupCall(_)                                                     => compile_cleanup_call(plan, instrs, fienv, env),
+        NonBinExpr::CleanupExpr(expr, _)                                               => compile_cleanup_expr(*expr, plan, instrs, fienv, env),
+        NonBinExpr::IdExpr(id, _)                                                      => compile_id_expr(*id, plan, instrs, fienv, env),
+        NonBinExpr::LitExpr(lit, range)                                                    => compile_lit_expr(lit, range, plan, instrs, fienv, env),
+        NonBinExpr::ParenExpr(expr, _)                                                 => compile_paren_expr(*expr, plan, instrs, fienv, env),
+        NonBinExpr::UnaryExpr(un, expr, _)                                                 => compile_unary_expr(un, *expr, plan, instrs, fienv, env),
+        NonBinExpr::IfExpr(cond, expr, _)                                                  => compile_if_expr(*cond, *expr, plan, instrs, fienv, env),
+        NonBinExpr::IfElse(cond, expr1, expr2, _)                                              => compile_if_else(*cond, *expr1, *expr2, plan, instrs, fienv, env),
+        NonBinExpr::UnlExpr(cond, expr, _)                                                 => compile_unless_expr(*cond, *expr, plan, instrs, fienv, env),
+        NonBinExpr::UnlElse(cond, expr1, expr2, _)                                             => compile_unless_else(*cond, *expr1, *expr2, plan, instrs, fienv, env),
+        NonBinExpr::WhileExpr(cond, expr, _)                                               => compile_while_expr(*cond, *expr, plan, instrs, fienv, env),
+        NonBinExpr::DoWhile(expr, cond, _)                                                 => compile_do_while(*cond, *expr, plan, instrs, fienv, env),
+        NonBinExpr::Break(range)                                                           => compile_break(range, plan, instrs, fienv, env),
+        NonBinExpr::Continue(range)                                                        => compile_continue(range, plan, instrs, fienv, env),
     }
 }
-pub fn compile_block_expr(mut exprs: Vec<Expr>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_block_expr(mut exprs: Vec<Expr>, range: Range<usize>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     let last = match exprs.pop() {
         Some(expr) => expr,
         None => {
             // Empty block expression
             match &plan {
                 ReturnPlan::Binop(b, place) => {
-                    return Err(format!("Empty block expression but expected to return to a binop expression, {} at {}", b, place));
+                    return u_err!(range, "Empty block expression but expected to return to a binop expression, {} at {}", b, place);
                 }
                 ReturnPlan::Move(place) => {
-                    return Err(format!("Empty block expression but expected to move result to {}", place));
+                    return u_err!(range, "Empty block expression but expected to move result to {}", place);
                 }
                 ReturnPlan::Condition => {
-                    return Err(format!("Empty block expression but expected to get condition codes from expr"));
+                    return u_err!(range, "Empty block expression but expected to get condition codes from expr");
                 }
                 ReturnPlan::Push(tt) => {
-                    return Err(format!("Empty block expression but expected to push result of type {}", tt));
+                    return u_err!(range, "Empty block expression but expected to push result of type {}", tt);
                 }
                 ReturnPlan::Return => {
-                    return Err(format!("Empty block expression but expected to return result of type {}", fienv.return_type()));
+                    return u_err!(range, "Empty block expression but expected to return result of type {}", fienv.return_type());
                 }
                 ReturnPlan::None => {
                     return Ok(());
@@ -141,7 +143,7 @@ pub fn compile_block_expr(mut exprs: Vec<Expr>, plan: ReturnPlan, instrs: &mut V
     compile_expr(last, plan, instrs, fienv, env)?;
     Ok(())
 }
-pub fn compile_assign_expr(id: IdExpr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_assign_expr(id: IdExpr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     // Check that the variable exists
     let place = place_from_id_expr(id, instrs, fienv, env)?;
     let assign_plan = ReturnPlan::Move(place.clone());
@@ -149,7 +151,7 @@ pub fn compile_assign_expr(id: IdExpr, expr: Expr, plan: ReturnPlan, instrs: &mu
     plan.into_inter_instr(place, instrs, fienv, env)?;
     Ok(())
 }
-pub fn compile_var_decl_assign(vd: VarDecl, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_var_decl_assign(vd: VarDecl, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     let field = Field::new(vd, env);
     fienv.add_var(&field)?;
     let place = Place::Var(field);
@@ -158,28 +160,28 @@ pub fn compile_var_decl_assign(vd: VarDecl, expr: Expr, plan: ReturnPlan, instrs
     plan.into_inter_instr(place, instrs, fienv, env)?;
     Ok(())
 }
-pub fn compile_return_expr(expr: Option<Expr>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_return_expr(expr: Option<Expr>, range: Range<usize>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     let plan = ReturnPlan::Return;
     match expr {
         Some(expr) => compile_expr(expr, plan, instrs, fienv, env),
         None => {
-            if fienv.return_type().is_void() {
-                Err(format!("Must give an expression to return for function with return type {}", fienv.return_type()))
+            if !fienv.return_type().is_void() {
+                u_err!(range, "Must give an expression to return for function with return type {}", fienv.return_type())
             } else {
                 Ok(())
             }
         }
     }
 }
-pub fn compile_cleanup_call(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
+pub fn compile_cleanup_call(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), BudErr> {
     let cleanup_label = fienv.get_cleanup_label();
     let instr = InterInstr::Goto(cleanup_label);
     instrs.push(instr);
     Ok(())
 }
-pub fn compile_cleanup_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_cleanup_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     if fienv.cleanup_expr_created {
-        return Err(format!("Found more than one cleanup expression. There should only be one."));
+        return u_err!(expr.get_range(), "Found more than one cleanup expression. There should only be one.");
     }
     match plan {
         ReturnPlan::Return => {
@@ -191,16 +193,16 @@ pub fn compile_cleanup_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<Inter
             Ok(())
         }
         _ => {
-            Err(format!("Can only compile cleanup expression where a return value is expected. The cleanup expression should be at the end of the function."))
+            u_err!(expr.get_range(), "Can only compile cleanup expression where a return value is expected. The cleanup expression should be at the end of the function.")
         }
     }
 }
-pub fn compile_id_expr(id: IdExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_id_expr(id: IdExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     let place = place_from_id_expr(id, instrs, fienv, env)?;
     plan.into_inter_instr(place, instrs, fienv, env)?;
     Ok(())
 }
-pub fn compile_lit_expr(lit: Literal, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_lit_expr(lit: Literal, range: Range<usize>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     match lit {
         Literal::Num(num) => {
             plan.imm_into_inter_instr(num, instrs, fienv, env)?;
@@ -215,34 +217,34 @@ pub fn compile_lit_expr(lit: Literal, plan: ReturnPlan, instrs: &mut Vec<InterIn
                 ReturnPlan::Push(tt) => {
                     let str_tt = Environment::get_str_tt();
                     if tt != str_tt {
-                        return Err(format!("Expected to push value of type {} to stack but found string type {}", tt, str_tt));
+                        return u_err!(range, "Expected to push value of type {} to stack but found string type {}", tt, str_tt);
                     }
                     let instr = InterInstr::Puss(str_ind);
                     instrs.push(instr);
                 }
                 ReturnPlan::Condition => {
-                    return Err(format!("Cannot get condition codes from string literal \"{}\"", string));
+                    return u_err!(range, "Cannot get condition codes from string literal \"{}\"", string);
                 }
                 ReturnPlan::Binop(b, _) =>  {
-                    return Err(format!("Cannot do binary operation {} on string literal \"{}\"", b, string));
+                    return u_err!(range, "Cannot do binary operation {} on string literal \"{}\"", b, string);
                 }
-                ReturnPlan::Return => fienv.rets(str_ind, instrs, env)?,
+                ReturnPlan::Return => fienv.rets(str_ind, instrs, env, Some(range))?,
                 ReturnPlan::None => {}
             }
         }
     }
     Ok(())
 }
-pub fn compile_paren_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_paren_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     compile_expr(expr, plan, instrs, fienv, env)
 }
 /// Gets a reference to the given NonBinExpr and follows the given ReturnPlan with it.
-pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     // nbe needs to be an IdExpr
-    if let NonBinExpr::IdExpr(id_expr) = nbe {
+    if let NonBinExpr::IdExpr(id_expr, range) = nbe {
         let place = place_from_id_expr(*id_expr, instrs, fienv, env)?;
         if let ReturnPlan::Binop(b, _) = plan {
-            return Err(format!("Binop {} not supported with references yet", b));
+            return u_err!(range, "Binop {} not supported with references yet", b);
         }
         match place {
             Place::Var(field) => {
@@ -256,7 +258,7 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                         Ok(())
                     }
                     ReturnPlan::Condition => {
-                        let atemp = fienv.get_addr_temp()?;
+                        let atemp = fienv.get_addr_temp();
                         let a_place = Place::ATemp(atemp);
                         let instr = InterInstr::MoVA(field.name, a_place.clone());
                         instrs.push(instr);
@@ -265,14 +267,14 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                     }
                     ReturnPlan::Push(tt) => {
                         if tt != field.tt {
-                            return Err(format!("Cannot convert {} to {}", field.tt, tt));
+                            return u_err!(range, "Cannot convert {} to {}", field.tt, tt);
                         }
                         let instr = InterInstr::PuVA(field.name);
                         instrs.push(instr);
                         Ok(())
                     }
                     ReturnPlan::Return => {
-                        fienv.retva(&field.name, instrs, env)?;
+                        fienv.retva(&field.name, instrs, env, Some(range))?;
                         warn!("Returning reference to local variable `{}` from function", field.name);
                         Ok(())
                     }
@@ -283,10 +285,10 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                 }
             }
             Place::ATemp(a) => {
-                return Err(format!("Cannot get reference to temporary address register A{}", a));
+                c_err!(range, "Cannot get reference to temporary address register A{}", a)
             },
             Place::DTemp(d, tt) => {
-                return Err(format!("Cannot get reference to temporary data register {} D{}", tt, d));
+                c_err!(range, "Cannot get reference to temporary data register {} D{}", tt, d)
             },
             Place::Ref(a, d, off, tt) => {
                 match plan {
@@ -318,13 +320,13 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                                         if let Some(d) = d { fienv.free_data_temp(d); }
                                         Ok(())
                                     } else {
-                                        Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt))
+                                        u_err!(range, "Trying to cast pointer of type {} to type {}", tt, to_val_tt)
                                     }
                                 } else {
-                                    Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                    c_err!(range, "Trying to move pointer {} to DTemp of type {}",
                                         Place::Ref(a, d, off, tt),
                                         to_tt
-                                    ))
+                                    )
                                 }
                             }
                             Place::Var(field) => {
@@ -340,13 +342,13 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                                         if let Some(d) = d { fienv.free_data_temp(d); }
                                         Ok(())
                                     } else {
-                                        Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt))
+                                        u_err!(range, "Trying to cast pointer of type {} to type {}", tt, to_val_tt)
                                     }
                                 } else {
-                                    Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                    c_err!(range, "Trying to move pointer {} to DTemp of type {}",
                                         Place::Ref(a, d, off, tt),
                                         field.tt
-                                    ))
+                                    )
                                 }
                             }
                             Place::Ref(_, _, _, to_tt) => {
@@ -364,20 +366,20 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                                         if let Some(d) = d { fienv.free_data_temp(d); }
                                         Ok(())
                                     } else {
-                                        Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt))
+                                        u_err!(range, "Trying to cast pointer of type {} to type {}", tt, to_val_tt)
                                     }
                                 } else {
-                                    Err(format!("Trying to move pointer {} to DTemp of type {}",
+                                    c_err!("Trying to move pointer {} to DTemp of type {}",
                                         Place::Ref(a, d, off, tt),
                                         to_tt
-                                    ))
+                                    )
                                 }
                             }
                         }
                     }
                     ReturnPlan::Condition => {
                         // Move from Ref to ATemp
-                        let atemp = fienv.get_addr_temp()?;
+                        let atemp = fienv.get_addr_temp();
                         let instr = InterInstr::Lea(a, d, off, atemp);
                         instrs.push(instr);
                         fienv.free_addr_temp(atemp);
@@ -395,13 +397,13 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                                 if let Some(d) = d { fienv.free_data_temp(d); }
                                 Ok(())
                             } else {
-                                Err(format!("Trying to cast pointer of type {} to type {}", tt, to_val_tt))
+                                u_err!(range, "Trying to cast pointer of type {} to type {}", tt, to_val_tt)
                             }
                         } else {
-                            Err(format!("Trying to move pointer {} to DTemp of type {}",
+                            c_err!(range, "Trying to move pointer {} to DTemp of type {}",
                                 Place::Ref(a, d, off, tt),
                                 to_tt
-                            ))
+                            )
                         }
                     }
                     ReturnPlan::Return => {
@@ -411,7 +413,7 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                         let instr = InterInstr::Lea(a, d, off, a);
                         instrs.push(instr);
                         let a_place = Place::ATemp(a);
-                        fienv.ret(a_place, instrs, env)?;
+                        fienv.ret(a_place, instrs, env, Some(range))?;
                         if let Some(d) = d { fienv.free_data_temp(d); }
                         Ok(())
                     }
@@ -424,17 +426,17 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
             },
         }
     } else {
-        Err(format!("Cannot get reference to non-IdExpr"))
+        u_err!(nbe.get_range(), "Cannot get reference to non-IdExpr")
     }
 }
-pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     let tt = plan.get_type(fienv);
     if let BudUnop::Ref = un {
         return get_reference(nbe, plan, instrs, fienv, env);
     }
     if let Some(tt) = &tt {
         if !tt.is_magic(env) {
-            return Err(format!("Cannot return non-magic type {} from unary operator {}", tt, un));
+            return u_err!(nbe.get_range(), "Cannot return non-magic type {} from unary operator {}", tt, un);
         }
     }
     match (plan.clone(), un) {
@@ -463,7 +465,7 @@ pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs
         (_, un) => {
             // Store the result of `nbe` into a dtemp, do the unop, and then move the dtemp as the plan dictates
             let tt = tt.unwrap();   // if plan is not None, then tt is not None
-            let dtemp = fienv.get_data_temp(tt.clone())?;
+            let dtemp = fienv.get_data_temp(tt.clone(), Some(nbe.get_range()))?;
             let d_place = Place::DTemp(dtemp, tt);
             let instr = match un {
                 BudUnop::Neg => InterInstr::Neg(d_place.clone()),
@@ -477,24 +479,24 @@ pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs
     }
     Ok(())
 }
-fn eval_cond(cond: Expr, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+fn eval_cond(cond: Expr, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     let plan = ReturnPlan::Condition;
     compile_expr(cond, plan, instrs, fienv, env)?;
     // Condition codes should be set accordingly. I hope they are.
     Ok(())
 }
-pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     match plan {
         ReturnPlan::None => {}
         ReturnPlan::Return => {
             if !fienv.return_type().is_void() {
-                return Err(format!("Cannot return a value from if statement. Tried to return type {}", fienv.return_type()));
+                return u_err!(expr.get_range(), "Cannot return a value from if statement. Tried to return type {}", fienv.return_type());
             }
         }
-        ReturnPlan::Condition => { return Err(format!("Cannot get condition codes from if statement.")); }
-        ReturnPlan::Binop(b, _) => { return Err(format!("Cannot return a value from if statement. Tried to return to binop {}", b)); }
-        ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from if statement.")); }
-        ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from if statement. Tried to push type {}", tt)); }
+        ReturnPlan::Condition => { return u_err!(expr.get_range(), "Cannot get condition codes from if statement."); }
+        ReturnPlan::Binop(b, _) => { return u_err!(expr.get_range(), "Cannot return a value from if statement. Tried to return to binop {}", b); }
+        ReturnPlan::Move(_) => { return u_err!(expr.get_range(), "Cannot return a value from if statement."); }
+        ReturnPlan::Push(tt) => { return u_err!(expr.get_range(), "Cannot return a value from if statement. Tried to push type {}", tt); }
     }
     let f_label = fienv.get_new_label();
     let instr = InterInstr::Beq(f_label);
@@ -508,7 +510,7 @@ pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Ve
     }
     Ok(())
 }
-pub fn compile_if_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_if_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
     let e_label = fienv.get_new_label();    // end label
@@ -524,18 +526,18 @@ pub fn compile_if_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, i
     instrs.push(instr);
     Ok(())
 }
-pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     match plan {
         ReturnPlan::None => {}
         ReturnPlan::Return => {
             if !fienv.return_type().is_void() {
-                return Err(format!("Cannot return a value from unless statement. Tried to return type {}", fienv.return_type()));
+                return u_err!(expr.get_range(), "Cannot return a value from unless statement. Tried to return type {}", fienv.return_type());
             }
         }
-        ReturnPlan::Condition => { return Err(format!("Cannot get condition codes from unless statement.")); }
-        ReturnPlan::Binop(b, _) => { return Err(format!("Cannot return a value from unless statement. Tried to return to binop {}", b)); }
-        ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from unless statement.")); }
-        ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from unless statement. Tried to push type {}", tt)); }
+        ReturnPlan::Condition => { return u_err!(expr.get_range(), "Cannot get condition codes from unless statement."); }
+        ReturnPlan::Binop(b, _) => { return u_err!(expr.get_range(), "Cannot return a value from unless statement. Tried to return to binop {}", b); }
+        ReturnPlan::Move(_) => { return u_err!(expr.get_range(), "Cannot return a value from unless statement."); }
+        ReturnPlan::Push(tt) => { return u_err!(expr.get_range(), "Cannot return a value from unless statement. Tried to push type {}", tt); }
     }
     eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
@@ -550,7 +552,7 @@ pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mu
     }
     Ok(())
 }
-pub fn compile_unless_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_unless_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
     let e_label = fienv.get_new_label();    // end_label
@@ -566,18 +568,18 @@ pub fn compile_unless_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPla
     instrs.push(instr);
     Ok(())
 }
-pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     match plan {
         ReturnPlan::None => {}
         ReturnPlan::Return => {
             if !fienv.return_type().is_void() {
-                return Err(format!("Cannot return a value from while loop. Tried to return type {}", fienv.return_type()));
+                return u_err!(expr.get_range(), "Cannot return a value from while loop. Tried to return type {}", fienv.return_type());
             }
         }
-        ReturnPlan::Condition => { return Err(format!("Cannot get condition codes from while loop.")); }
-        ReturnPlan::Binop(b, _) => { return Err(format!("Cannot return a value from while loop. Tried to return to binop {}", b)); }
-        ReturnPlan::Move(_) => { return Err(format!("Cannot return a value from while loop.")); }
-        ReturnPlan::Push(tt) => { return Err(format!("Cannot return a value from while loop. Tried to push type {}", tt)); }
+        ReturnPlan::Condition => { return u_err!(expr.get_range(), "Cannot get condition codes from while loop."); }
+        ReturnPlan::Binop(b, _) => { return u_err!(expr.get_range(), "Cannot return a value from while loop. Tried to return to binop {}", b); }
+        ReturnPlan::Move(_) => { return u_err!(expr.get_range(), "Cannot return a value from while loop."); }
+        ReturnPlan::Push(tt) => { return u_err!(expr.get_range(), "Cannot return a value from while loop. Tried to push type {}", tt); }
     }
     let continue_label = fienv.get_new_label();
     let break_label = fienv.get_new_label();
@@ -597,39 +599,39 @@ pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut
     }
     Ok(())
 }
-pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     let tt = expr.type_preference(fienv, env)?;
     let ret_place;
     match &plan {
         ReturnPlan::None => ret_place = None,
         ReturnPlan::Return => {
             if tt.is_array() || tt.is_struct() {
-                return Err(format!("Returning arrays and structs from functions not yet supported"));
+                return u_err!(expr.get_range(), "Returning arrays and structs from functions not yet supported");
             }
             if fienv.return_type().is_void() {
                 ret_place = None;
             } else {
-                let dtemp = fienv.get_data_temp(tt.clone())?;
+                let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range()))?;
                 ret_place = Some(Place::DTemp(dtemp, tt));
             }
         }
         ReturnPlan::Condition => {
             if tt.is_array() || tt.is_struct() {
-                return Err(format!("Cannot get condition codes from array or struct"));
+                return u_err!(expr.get_range(), "Cannot get condition codes from array or struct");
             }
-            let dtemp = fienv.get_data_temp(tt.clone())?;
+            let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range()))?;
             ret_place = Some(Place::DTemp(dtemp, tt));
         }
         ReturnPlan::Binop(b, _) => {
             if tt.is_array() || tt.is_struct() {
-                return Err(format!("Cannot do binop {} on array or struct", b));
+                return u_err!(expr.get_range(), "Cannot do binop {} on array or struct", b);
             }
-            let dtemp = fienv.get_data_temp(tt.clone())?;
+            let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range()))?;
             ret_place = Some(Place::DTemp(dtemp, tt));
         }
         ReturnPlan::Move(to) => ret_place = Some(to.clone()),
         ReturnPlan::Push(push_tt) => {
-            let dtemp = fienv.get_data_temp(push_tt.clone())?;
+            let dtemp = fienv.get_data_temp(push_tt.clone(), Some(expr.get_range()))?;
             ret_place = Some(Place::DTemp(dtemp, push_tt.clone()));
         }
     }
@@ -657,32 +659,32 @@ pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut V
     }
     Ok(())
 }
-pub fn compile_break(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
+pub fn compile_break(range: Range<usize>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), BudErr> {
     match fienv.get_break_label() {
         Some(break_label) => {
             let instr = InterInstr::Goto(break_label);
             instrs.push(instr);
         }
         None => {
-            return Err(format!("Break found outside loop"));
+            return u_err!(range, "Break found outside loop");
         }
     }
     Ok(())
 }
-pub fn compile_continue(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), String> {
+pub fn compile_continue(range: Range<usize>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), BudErr> {
     match fienv.get_continue_label() {
         Some(continue_label) => {
             let instr = InterInstr::Goto(continue_label);
             instrs.push(instr);
         }
         None => {
-            return Err(format!("Continue found outside loop"));
+            return u_err!(range, "Continue found outside loop");
         }
     }
     Ok(())
 }
 
-pub fn call_func(id: String, offsets: Vec<Expr>, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
+pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, BudErr> {
     // Check if it's a function call
     match env.global_funcs.get(&id) {
         Some(sig) => {
@@ -716,11 +718,11 @@ pub fn call_func(id: String, offsets: Vec<Expr>, instrs: &mut Vec<InterInstr>, f
             instrs.push(instr);
             let instr = InterInstr::Call(id.clone(), marker);
             instrs.push(instr);
-            let place = env.ret_place(id)?;
+            let place = env.ret_place(id, Some(range))?;
             Ok(place)
         }
         None => {
-            Err(format!("Undeclared variable {}", id))
+            u_err!("Undeclared function {}", id)
         }
     }
 }
@@ -753,71 +755,71 @@ pub fn call_func(id: String, offsets: Vec<Expr>, instrs: &mut Vec<InterInstr>, f
 /// object or read from it. 
 /// 
 /// `}`
-pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
+pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, BudErr> {
     match id {
-        IdExpr::SquareIndex(id, offset) => {
+        IdExpr::SquareIndex(id, offset, _) => {
             // The id must be assignable
             match *id.bin_expr {
-                BinExpr::NonBin(nbe) => {
-                    if let NonBinExpr::IdExpr(id_expr) = *nbe {
+                BinExpr::NonBin(nbe, range) => {
+                    if let NonBinExpr::IdExpr(id_expr, _) = *nbe {
                         let id_place = place_from_id_expr(*id_expr, instrs, fienv, env)?;
                         // Check if the offset is a literal value
                         let mut lit = None;
-                        if let BinExpr::NonBin(nbe) = &*offset.bin_expr {
-                            if let NonBinExpr::LitExpr(Literal::Num(num)) = &**nbe {
+                        if let BinExpr::NonBin(nbe, _) = &*offset.bin_expr {
+                            if let NonBinExpr::LitExpr(Literal::Num(num), _) = &**nbe {
                                 lit = Some(*num);
                             }
                             // TODO Handle struct member access here
                         }
                         match lit {
                             Some(num) => {
-                                let place = id_place.index_into(None, num, false, instrs, fienv, env)?;
+                                let place = id_place.index_into(None, num, false, range, instrs, fienv, env)?;
                                 return Ok(place);
                             }
                             None => {
                                 let tt = TypeType::Id("i32".to_owned());
-                                let off_temp = fienv.get_data_temp(tt.clone())?;   // offset as an index (not multiplied by sizeof(T))
+                                let off_temp = fienv.get_data_temp(tt.clone(), Some(range))?;   // offset as an index (not multiplied by sizeof(T))
                                 let off_place = Place::DTemp(off_temp, tt);
                                 let plan = ReturnPlan::Move(off_place);
                                 compile_expr(*offset, plan, instrs, fienv, env)?;
-                                let place = id_place.index_into(Some(off_temp), 0, false, instrs, fienv, env)?;
+                                let place = id_place.index_into(Some(off_temp), 0, false, range, instrs, fienv, env)?;
                                 return Ok(place);
                             }
                         }
                     }
                     // id was a NonBinExpr but not an IdExpr
-                    Err(format!("Expression not assignable"))
+                    u_err!(range, "Expression not assignable")
                 }
-                BinExpr::Binary(_, b, _) => {
+                BinExpr::Binary(_, b, _, range) => {
                     // id was not a NonBinExpr (it was a BinExpr)
-                    Err(format!("Cannot index into binary expression, {}", b))
+                    u_err!(range, "Cannot index into binary expression, {}", b)
                 }
             }
         },
-        IdExpr::RoundIndex(id, offsets) => {
+        IdExpr::RoundIndex(id, offsets, _) => {
             // The id must be assignable
             match *id.bin_expr {
-                BinExpr::NonBin(nbe) => {
-                    if let NonBinExpr::IdExpr(id_expr) = *nbe {
+                BinExpr::NonBin(nbe, range) => {
+                    if let NonBinExpr::IdExpr(id_expr, range) = *nbe {
                         let offsets = match offsets {
                             Some(offsets) => offsets,
                             None => Vec::new(),
                         };
                         let offset;
-                        let id_place = if let IdExpr::Id(id) = *id_expr {
+                        let id_place = if let IdExpr::Id(id, range) = *id_expr {
                             match fienv.get_var(&id) {
                                 Some(field) => {
                                     // variable exists
                                     if offsets.len() == 1 {
                                         offset = offsets.into_iter().next().unwrap();
                                     } else {
-                                        return Err(format!("Array indexing with () should only get 1 argument, but {} were given", offsets.len()));
+                                        return u_err!(range, "Array indexing with () should only get 1 argument, but {} were given", offsets.len());
                                     }
                                     Place::Var(field)
                                 }
                                 None => {
                                     // Check if it's a function call
-                                    return call_func(id, offsets, instrs, fienv, env);
+                                    return call_func(id, offsets, range, instrs, fienv, env);
                                 }
                             }
                         } else {
@@ -826,60 +828,60 @@ pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, fienv: &mut 
                             if offsets.len() == 1 {
                                 offset = offsets.into_iter().next().unwrap();
                             } else {
-                                return Err(format!("Array indexing with () should only get 1 argument, but {} were given", offsets.len()));
+                                return u_err!(range, "Array indexing with () should only get 1 argument, but {} were given", offsets.len());
                             }
                             place_from_id_expr(*id_expr, instrs, fienv, env)?
                         };
 
                         // Check if the offset is a literal value
                         let mut lit = None;
-                        if let BinExpr::NonBin(nbe) = &*offset.bin_expr {
-                            if let NonBinExpr::LitExpr(Literal::Num(num)) = &**nbe {
+                        if let BinExpr::NonBin(nbe, _) = &*offset.bin_expr {
+                            if let NonBinExpr::LitExpr(Literal::Num(num), _) = &**nbe {
                                 lit = Some(*num);
                             }
                         }
                         match lit {
                             Some(num) => {
-                                let place = id_place.index_into(None, num, true, instrs, fienv, env)?;
+                                let place = id_place.index_into(None, num, true, range, instrs, fienv, env)?;
                                 return Ok(place);
                             }
                             None => {
                                 let tt = TypeType::Id("i32".to_owned());
-                                let off_temp = fienv.get_data_temp(tt.clone())?;   // offset as an index (not multiplied by sizeof(T))
+                                let off_temp = fienv.get_data_temp(tt.clone(), Some(range))?;   // offset as an index (not multiplied by sizeof(T))
                                 let off_place = Place::DTemp(off_temp, tt);
                                 let plan = ReturnPlan::Move(off_place);
                                 compile_expr(offset, plan, instrs, fienv, env)?;
-                                let place = id_place.index_into(Some(off_temp), 0, true, instrs, fienv, env)?;
+                                let place = id_place.index_into(Some(off_temp), 0, true, range, instrs, fienv, env)?;
                                 return Ok(place);
                             }
                         }
                     }
                     // id was a NonBinExpr but not an IdExpr
-                    Err(format!("Expression not assignable"))
+                    u_err!(range, "Expression not assignable")
                 }
-                BinExpr::Binary(_, b, _) => {
+                BinExpr::Binary(_, b, _, range) => {
                     // id was not a NonBinExpr (it was a BinExpr)
-                    Err(format!("Cannot index into binary expression, {}", b))
+                    u_err!(range, "Cannot index into binary expression, {}", b)
                 }
             }
         },
-        IdExpr::Id(id) => {
+        IdExpr::Id(id, range) => {
             // We need to store the result of expr into the variable, id
             let place = match fienv.get_var(&id) {
                 Some(field) => {
                     Place::Var(field)
                 },
                 None => {
-                    return Err(format!("Undeclared variable {}", id));
+                    return u_err!(range, "Undeclared variable {}", id);
                 }
             };
             Ok(place)
         },
-        IdExpr::Deref(id_expr) => {
+        IdExpr::Deref(id_expr, range) => {
             // We need to store the result of expr into the memory
             // location pointed to by the variable, id
             let place = place_from_id_expr(*id_expr, instrs, fienv, env)?;
-            Ok(place.index_into(None, 0, false, instrs, fienv, env)?)
+            Ok(place.index_into(None, 0, false, range, instrs, fienv, env)?)
         },
     }
 }

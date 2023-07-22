@@ -11,7 +11,7 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use crate::{bud::BudBinop, m68k::*};
+use crate::{bud::BudBinop, error::*, m68k::*, u_err, c_err};
 
 use super::{inter_instr::*, fienv::FunctionInterEnvironment};
 
@@ -47,7 +47,7 @@ pub enum ReturnPlan {
 }
 impl ReturnPlan {
     /// Also frees this place. If self is `Return`, also adds `Rts` instruction
-    pub fn into_inter_instr(self, from: Place, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn into_inter_instr(self, from: Place, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), UserErr> {
         let from_tt = from.get_type();
         let from_tt_size = from_tt.get_size(env);
         let to_tt;
@@ -56,10 +56,10 @@ impl ReturnPlan {
             ReturnPlan::Binop(b, to) => {
                 to_tt = to.get_type();
                 if !to.is_magic(env) {
-                    return Err(format!("Cannot do binary operator {} on non-magic type {}", b, to.get_type()));
+                    return u_err!("Cannot do binary operator {} on non-magic type {}", b, to.get_type());
                 }
                 if !from.is_magic(env) {
-                    return Err(format!("Cannot do binary operator {} on non-magic type {}", b, from.get_type()));
+                    return u_err!("Cannot do binary operator {} on non-magic type {}", b, from.get_type());
                 }
                 let instr = InterInstr::Binop(from.clone(), b, to);
                 instrs.push(instr);
@@ -84,7 +84,7 @@ impl ReturnPlan {
                 from.free(fienv);
             }
             ReturnPlan::Return => {
-                return fienv.ret(from.clone(), instrs, env);
+                return fienv.ret(from.clone(), instrs, env, None);
             },
             ReturnPlan::None => {
                 from.free(fienv);
@@ -96,14 +96,14 @@ impl ReturnPlan {
             if from_tt.get_size(env) == to_tt.get_size(env) {
                 warn!("Implicit cast between equally sized types: {} -> {}", from_tt, to_tt);
             } else {
-                return Err(format!("Implicit cast between unequally sized types: {} -> {} ({} -> {})", from_tt, to_tt, from_tt_size, to_tt_size));
+                return u_err!("Implicit cast between unequally sized types: {} -> {} ({} -> {})", from_tt, to_tt, from_tt_size, to_tt_size);
             }
         }
         Ok(())
     }
     /// Has no effect if there is no return plan
     /// Pass a size of LWord if it doesn't matter. This function will coerce the size to the one the plan requires.
-    pub fn imm_into_inter_instr(self, from: Imm, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), String> {
+    pub fn imm_into_inter_instr(self, from: Imm, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
         match self {
             ReturnPlan::Binop(b, to) => {
                 let instr = InterInstr::Binopi(from, b, to);
@@ -122,18 +122,18 @@ impl ReturnPlan {
                 let instr = InterInstr::Pusi(from, size);
                 instrs.push(instr);
             }
-            ReturnPlan::Return => fienv.reti(from, instrs, env)?,
+            ReturnPlan::Return => fienv.reti(from, instrs, env, None)?,
             ReturnPlan::None => {},
         }
         Ok(())
     }
-    fn get_imm_size(from: Imm, tt: TypeType, env: &Environment) -> Result<DataSize, String> {
+    fn get_imm_size(from: Imm, tt: TypeType, env: &Environment) -> Result<DataSize, BudErr> {
         if !tt.is_magic(env) {
-            return Err(format!("Cannot coerce immediate value {} to non-magic type {}", from, tt));
+            return u_err!("Cannot coerce immediate value {} to non-magic type {}", from, tt);
         }
         match tt.get_data_size(env) {
             Some(ds) => Ok(ds),
-            None => Err(format!("Magic type {} has invalid size, {}", tt, tt.get_size(env))),
+            None => c_err!("Magic type {} has invalid size, {}", tt, tt.get_size(env)),
         }
     }
     /// Returns type type you are expected to give to this plan. If the plan is None or Condition, then this function returns None.

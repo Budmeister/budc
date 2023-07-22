@@ -7,6 +7,7 @@
 extern crate proc_macros;
 
 pub mod bud;
+pub mod error;
 pub mod m68k;
 pub mod grammar;
 pub mod slp;

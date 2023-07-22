@@ -13,7 +13,9 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use crate::{m68k::*, bud::BudBinop};
+use std::ops::Range;
+
+use crate::{m68k::*, bud::BudBinop, error::*, u_err, c_err};
 
 use super::{inter_instr::*, fienv::FunctionInterEnvironment};
 
@@ -84,12 +86,12 @@ impl Place {
         }
     }
     /// Moves the value in the given DTemp to a new ATemp. This function frees the DTemp, and you must free the ATemp.
-    fn d_to_a(d: DTemp, tt: TypeType, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<ATemp, String> {
+    fn d_to_a(d: DTemp, tt: TypeType, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<ATemp, CompilerErr> {
         match tt.get_data_size(env) {
             Some(_) => {},
-            None => { return Err(format!("DTemp {} containing large value", d)); },
+            None => { return c_err!("DTemp {} containing large value", d); },
         };
-        let a = fienv.get_addr_temp()?;
+        let a = fienv.get_addr_temp();
         let d_place = Place::DTemp(d, tt);
         let a_place = Place::ATemp(a);
         let instr = InterInstr::Move(d_place, a_place);
@@ -118,7 +120,7 @@ impl Place {
     /// This function will return Err if
     /// * the type of this Place is not indexable
     /// * The `self` is DTemp and `self.is_array() || self.is_struct()`
-    pub fn index_into(self, d: Option<DTemp>, mut off: i32, checked: bool, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, String> {
+    pub fn index_into(self, d: Option<DTemp>, mut off: i32, checked: bool, range: Range<usize>, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<Place, BudErr> {
         let tt;
         let mut is_array = None;
         let mut is_struct = false;
@@ -128,7 +130,7 @@ impl Place {
                 is_array = Some(len_);
             }
             TypeType::Id(name) => {
-                return Err(format!("Cannot index into type {}", name));
+                return u_err!(range, "Cannot index into type {}", name);
             }
             TypeType::Pointer(tt_) => { tt = *tt_; },
             TypeType::Struct(name, Some(fields)) => {
@@ -141,40 +143,40 @@ impl Place {
                 // or this function should receive the name of the field
                 // or this function should receive an absolute offset and TypeType to return.
                 if off as usize >= fields.len() {
-                    return Err(format!("Invalid field index {} for struct {}", off, name));
+                    return c_err!(range, "Invalid field index {} for struct {}", off, name);
                 }
                 let f_name = &fields[off as usize].name;
                 let tt_ = fields[off as usize].tt.clone();
                 let s_tt = self.get_type();
                 let size = match env.types.get(&s_tt) {
                     Some(t) => t.size.clone(),
-                    None => { return Err(format!("Struct type not found in environment: {}", name)); },
+                    None => return u_err!(range, "Struct type not found in environment: {}", name),
                 };
                 if let Either::That((_, layout)) = size {
                     off = match layout.get(f_name) {
                         Some((off, _)) => *off as i32,
-                        None => { return Err(format!("Struct {} has no field {}", name, f_name)); },
+                        None => return u_err!(range, "Struct {} has no field {}", name, f_name),
                     };
                 } else {
-                    return Err(format!("Struct {} did not have a layout", name));
+                    return c_err!("Struct {} did not have a layout", name);
                 }
                 is_struct = true;
                 tt = tt_;
             }
             TypeType::Struct(name, None) => {
-                return Err(format!("Struct {} not fully initialized with fields", name));
+                return c_err!("Struct {} not fully initialized with fields", name);
             }
         };
         if let Some(len) = is_array {
             if off >= len {
                 if checked {
-                    return Err(format!("Array has length {} but is being indexed with literal {}", len, off));
+                    return u_err!(range, "Array has length {} but is being indexed with literal {}", len, off);
                 } else {
                     warn!("Array has length {} but is being indexed with literal {}", len, off);
                 }
             } else if checked {
                 let tt = TypeType::Id("i16".to_owned());
-                let dtemp = fienv.get_data_temp(tt.clone())?;
+                let dtemp = fienv.get_data_temp(tt.clone(), Some(range))?;
                 let d_place = Place::DTemp(dtemp, tt);
                 let instr = InterInstr::Move(self.clone(), d_place.clone());
                 instrs.push(instr);
@@ -200,7 +202,7 @@ impl Place {
             Place::ATemp(atemp) => Ok(Place::Ref(atemp, d, off, tt)),
             Place::DTemp(d_, _) => {
                 if is_struct || is_array.is_some() {
-                    Err(format!("Cannot store structs or arrays in data registers"))
+                    c_err!(range, "Cannot store structs or arrays in data registers")
                 } else {
                     Ok(Place::Ref(Self::d_to_a(d_, tt.clone(), instrs, fienv, env)?, d, off, tt))
                 }
@@ -231,7 +233,7 @@ impl Place {
                 }
             }
             Place::Var(Field { ref name, tt: _ }) => {
-                let a = fienv.get_addr_temp()?;
+                let a = fienv.get_addr_temp();
                 let a_place = Place::ATemp(a);
                 let instr = if is_struct || is_array.is_some() {
                     InterInstr::MoVA(name.clone(), a_place)
