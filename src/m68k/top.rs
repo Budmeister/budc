@@ -180,7 +180,12 @@ impl BudExpander {
         &self,
         log_options: &LoggingOptions,
         tree: Node<bud::BudTerminal, bud::BudNonTerminal>,
-    ) -> Result<Environment, BudErr> {
+    ) -> Result<Environment, Vec<(BudErr, Option<String>)>> {
+        impl From<BudErr> for Vec<(BudErr, Option<String>)> {
+            fn from(value: BudErr) -> Self {
+                vec![(value, None)]
+            }
+        }
         // Get Items
         let children;
         let range;
@@ -188,12 +193,12 @@ impl BudExpander {
             children = children_;
             range = range_;
         } else {
-            return c_err!(
-                tree.get_range(),
+            let err: Result<_, BudErr> = c_err!(tree.get_range(),
                 "Invalid node for {} {:?}",
                 bud::BudNonTerminal::Items,
                 tree
             );
+            return Ok(err?);
         }
         let items = bud::Item::news(&children, range)?;
 
@@ -229,39 +234,23 @@ impl BudExpander {
                 });
             debug!("End types found");
         }
-        let mut num_errors = 0;
         if log_options.print_inter_funcs {
             debug!("Funcs: {:?}", funcs.iter().map(|x| x.0.to_owned()).collect::<Vec<String>>());
         }
 
         // Compile all funcs
+        let mut errors = Vec::new();
         for (name, func) in funcs {
             match func.compile(log_options, &environment) {
                 Ok(cfunc) => environment.compiled_funcs.push(cfunc),
-                Err(BudErr::CompilerErr(err)) => {
-                    error!("In function {},", name);
-                    if let Some(location) = err.location {
-                        // TODO print out the text at the location, not just the location
-                        error!("At location: {:?}", location);
-                    }
-                    error!("Compiler Error: {}", err.msg);
-                    num_errors += 1;
-                }
-                Err(BudErr::UserErr(err)) => {
-                    error!("In function {},", name);
-                    if let Some(location) = err.location {
-                        error!("At location: {:?}", location);
-                    }
-                    error!("User Error: {}", err.msg);
-                    num_errors += 1;
-                }
+                Err(err) => errors.push((err, Some(name))),
             };
         }
         if log_options.print_inter_funcs {
             debug!("End inter funcs");
         }
-        if num_errors != 0 {
-            return u_err!("Unable to compile all functions because of errors in {} functions", num_errors);
+        if !errors.is_empty() {
+            return Err(errors);
         }
 
         Ok(environment)
