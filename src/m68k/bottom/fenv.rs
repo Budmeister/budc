@@ -15,7 +15,7 @@ use std::{collections::{HashMap, HashSet}, ops::{RangeFrom, Sub, Add}};
 
 use Proxy::*;
 
-use crate::m68k::*;
+use crate::{m68k::*, c_err, error::*};
 
 use super::instruction::*;
 
@@ -242,7 +242,7 @@ impl FunctionEnvironment {
     pub fn var_as_addr_mode(
         &self,
         name: String,
-    ) -> Result<AddrMode, String> {
+    ) -> Result<AddrMode, CompilerErr> {
         self.stack_item_to_addr_mode(StackItem::Var(name))
     }
     /// Returns an addressing mode that points to the given place.
@@ -256,7 +256,7 @@ impl FunctionEnvironment {
         place: Place,
         instrs: &mut Vec<ValidInstruction>,
         n: Proxy,
-    ) -> Result<AddrMode, String> {
+    ) -> Result<AddrMode, CompilerErr> {
         match place {
             Place::Var(name) => self.var_as_addr_mode(name.name),
             Place::ATemp(atemp) => match self.atemp_map.get(&atemp).unwrap() {
@@ -265,10 +265,10 @@ impl FunctionEnvironment {
             },
             Place::DTemp(dtemp, tt) => {
                 if tt.is_array() || tt.is_struct() {
-                    return Err(format!(
+                    return c_err!(
                         "Array or struct {} being stored in dtemp D{}",
                         tt, dtemp
-                    ));
+                    );
                 }
                 match self.dtemp_map.get(&dtemp).unwrap() {
                     Some(dreg) => Ok(AddrMode::D(*dreg)),
@@ -295,24 +295,24 @@ impl FunctionEnvironment {
         }
     }
     /// The returned AddrMode is always live. It will always be AIndDisp
-    pub fn stack_item_to_addr_mode(&self, stack_item: StackItem) -> Result<AddrMode, String> {
+    pub fn stack_item_to_addr_mode(&self, stack_item: StackItem) -> Result<AddrMode, CompilerErr> {
         match stack_item.clone() {
             StackItem::Var(name) => match self.stack_frame.get(&stack_item) {
                 Some(stack_diff) => Ok(AddrMode::AIndDisp(self.calculate_stack_height_if_possible(&(self.stack_height.clone() + *stack_diff)), SP)),
-                None => Err(format!("Unrecognized variable {}", name)),
+                None => c_err!("Unrecognized variable {}", name),
             },
             StackItem::DTemp(dtemp) => match self.dtemp_map.get(&dtemp) {
                 Some(Some(dreg)) => Ok((*dreg).into()),
                 _ => match self.stack_frame.get(&stack_item) {
                     Some(stack_diff) => Ok(AddrMode::AIndDisp(self.calculate_stack_height_if_possible(&(self.stack_height.clone() + *stack_diff)), SP)),
-                    None => Err(format!("DTemp {} not in dtemp_map or stack_frame", dtemp)),
+                    None => c_err!("DTemp {} not in dtemp_map or stack_frame", dtemp),
                 },
             },
             StackItem::ATemp(atemp) => match self.atemp_map.get(&atemp) {
                 Some(Some(areg)) => Ok((*areg).into()),
                 _ => match self.stack_frame.get(&stack_item) {
                     Some(stack_diff) => Ok(AddrMode::AIndDisp(self.calculate_stack_height_if_possible(&(self.stack_height.clone() + *stack_diff)), SP)),
-                    None => Err(format!("ATemp {} not in atemp_map or stack_frame", atemp)),
+                    None => c_err!("ATemp {} not in atemp_map or stack_frame", atemp),
                 },
             },
         }
@@ -323,53 +323,53 @@ impl FunctionEnvironment {
     /// Moves the Extra Stack Height (self.stack_height) to point to the given SMarker
     /// and returns a pointer to that SMarker as an AddrMode. The SP can then be changed
     /// to point to that SMarker using `Lea(smarker_addr, SP)`
-    pub fn move_esh_to_smarker(&mut self, smarker_lbl: usize) -> Result<AddrMode, String> {
+    pub fn move_esh_to_smarker(&mut self, smarker_lbl: usize) -> Result<AddrMode, CompilerErr> {
         let diff = self.get_smarker_diff(smarker_lbl)?;
         self.stack_height = self.get_smarker(smarker_lbl)?.clone();
         Ok(AddrMode::AIndDisp(diff.into(), SP))
     }
-    fn get_smarker_diff(&self, smarker_lbl: usize) -> Result<UncalculatedStackHeight, String> {
+    fn get_smarker_diff(&self, smarker_lbl: usize) -> Result<UncalculatedStackHeight, CompilerErr> {
         let diff = self.get_smarker(smarker_lbl)?.clone() - &self.stack_height;
         Ok(diff)
     }
-    fn get_smarker(&self, smarker_lbl: usize) -> Result<&UncalculatedStackHeight, String> {
+    fn get_smarker(&self, smarker_lbl: usize) -> Result<&UncalculatedStackHeight, CompilerErr> {
         match self.smarker_map.get(&smarker_lbl) {
             Some(stack_height) => Ok(stack_height),
-            None => Err(format!("SMarker {} doesn't exist", smarker_lbl)),
+            None => c_err!("SMarker {} doesn't exist", smarker_lbl),
         }
     }
     pub fn add_rs_lbl(&mut self, rs_lbl: RegisterSpaceLbl) {
         self.rs_map.insert(rs_lbl, (self.stack_height.clone(), None));
         self.stack_height.reg_spaces.push(rs_lbl);
     }
-    pub fn set_rs(&mut self, rs_lbl: RegisterSpaceLbl, adbf: ADBitField) -> Result<(), String> {
+    pub fn set_rs(&mut self, rs_lbl: RegisterSpaceLbl, adbf: ADBitField) -> Result<(), CompilerErr> {
         match self.rs_map.get_mut(&rs_lbl) {
             Some((_, regs)) => {
                 *regs = Some(adbf);
                 Ok(())
             }
-            None => Err(format!("RegisterSpace {} doesn't exist", rs_lbl))
+            None => c_err!("RegisterSpace {} doesn't exist", rs_lbl)
         }
     }
-    pub fn get_rs_regs(&self, rs_lbl: RegisterSpaceLbl) -> Result<Option<ADBitField>, String> {
+    pub fn get_rs_regs(&self, rs_lbl: RegisterSpaceLbl) -> Result<Option<ADBitField>, CompilerErr> {
         match self.rs_map.get(&rs_lbl) {
             Some((_, regs)) => Ok(*regs),
-            None => Err(format!("RegisterSpace {} doesn't exist", rs_lbl)),
+            None => c_err!("RegisterSpace {} doesn't exist", rs_lbl),
         }
     }
-    pub fn get_rs_height(&self, rs_lbl: RegisterSpaceLbl) -> Result<UncalculatedStackHeight, String> {
+    pub fn get_rs_height(&self, rs_lbl: RegisterSpaceLbl) -> Result<UncalculatedStackHeight, CompilerErr> {
         match self.rs_map.get(&rs_lbl) {
             Some((height, _)) => Ok(height.clone()),
-            None => Err(format!("RegisterSpace {} doesn't exist", rs_lbl))
+            None => c_err!("RegisterSpace {} doesn't exist", rs_lbl)
         }
     }
-    pub fn get_rs_addr_mode(&self, rs_lbl: RegisterSpaceLbl) -> Result<AddrMode, String> {
+    pub fn get_rs_addr_mode(&self, rs_lbl: RegisterSpaceLbl) -> Result<AddrMode, CompilerErr> {
         let height = self.get_rs_height(rs_lbl)?;
         let stack_diff: NumOrLbl = height.into();
         let addr_mode = AddrMode::AIndDisp(stack_diff, SP);
         Ok(addr_mode)
     }
-    pub fn temps_to_adbitfield(&self, temps: &[ADTemp], rs_lbl: Option<RegisterSpaceLbl>) -> Result<ADBitField, String> {
+    pub fn temps_to_adbitfield(&self, temps: &[ADTemp], rs_lbl: Option<RegisterSpaceLbl>) -> Result<ADBitField, CompilerErr> {
         // There should be no instrs added to dummy_instrs because it should only be passed
         // in where no instrs are needed
         let mut dummy_instrs = Vec::new();
@@ -395,12 +395,12 @@ impl FunctionEnvironment {
                     }
                 }
             })
-            .collect::<Result<Vec<ADReg>, String>>()?
+            .collect::<Result<Vec<ADReg>, CompilerErr>>()?
         );
         if !dummy_instrs.is_empty() {
             match rs_lbl {
-                Some(rs_lbl) => return Err(format!("Trying to save temps that aren't in regs (during saving to rs {}): {:?}", rs_lbl, temps)),
-                None => return Err(format!("Trying to save temps that aren't in regs: {:?}", temps)),
+                Some(rs_lbl) => return c_err!("Trying to save temps that aren't in regs (during saving to rs {}): {:?}", rs_lbl, temps),
+                None => return c_err!("Trying to save temps that aren't in regs: {:?}", temps),
             }
         }
         Ok(adbf)
@@ -417,7 +417,7 @@ impl FunctionEnvironment {
     /// Returns Ok(None) if at least one of the rs_lbls exist but haven't been given a size yet.
     /// 
     /// Returns Ok(Some) if all the rs_lbls exist and have been given a size
-    pub fn calculate_current_stack_height(&self) -> Result<Option<StackHeight>, String> {
+    pub fn calculate_current_stack_height(&self) -> Result<Option<StackHeight>, CompilerErr> {
         self.calculate_stack_height(&self.stack_height)
     }
     /// Returns Err if at least one of the rs_lbls don't exist.
@@ -425,7 +425,7 @@ impl FunctionEnvironment {
     /// Returns Ok(None) if at least one of the rs_lbls exist but haven't been given a size yet.
     /// 
     /// Returns Ok(Some) if all the rs_lbls exist and have been given a size
-    pub fn calculate_stack_height(&self, ush: &UncalculatedStackHeight) -> Result<Option<StackHeight>, String> {
+    pub fn calculate_stack_height(&self, ush: &UncalculatedStackHeight) -> Result<Option<StackHeight>, CompilerErr> {
         let mut sh = ush.known;
         for rs_lbl in &ush.reg_spaces {
             match self.get_rs_size(*rs_lbl) {
@@ -448,10 +448,10 @@ impl FunctionEnvironment {
     /// Returns Ok(None) if the rs_lbl exists but hasn't been given a size yet.
     /// 
     /// Returns Ok(Some) if the rs_lbl exists and has been given a size.
-    pub fn get_rs_size(&self, rs_lbl: RegisterSpaceLbl) -> Result<Option<RegisterSpaceSize>, String> {
+    pub fn get_rs_size(&self, rs_lbl: RegisterSpaceLbl) -> Result<Option<RegisterSpaceSize>, CompilerErr> {
         match self.rs_map.get(&rs_lbl) {
             Some((_, regs)) => Ok(regs.map(|adbf| adbf.rs_size())),
-            None => Err(format!("RSLabel {} doesn't exist", rs_lbl)),
+            None => c_err!("RSLabel {} doesn't exist", rs_lbl),
         }
     }
     /// Returns true precicely when a call to `place_to_dreg` would return a live DReg.
@@ -485,14 +485,14 @@ impl FunctionEnvironment {
         instrs: &mut Vec<ValidInstruction>,
         env: &Environment,
         n: Proxy,
-    ) -> Result<Proxied, String> {
+    ) -> Result<Proxied, CompilerErr> {
         match place {
             Place::Var(name) => {
                 if name.tt.is_array() || name.tt.is_struct() {
-                    return Err(format!(
+                    return c_err!(
                         "Cannot move array or struct {} into data reg",
                         name
-                    ));
+                    );
                 }
                 let proxy: DReg = n.into();
                 let size = name.tt.get_data_size(env).unwrap();
@@ -517,10 +517,10 @@ impl FunctionEnvironment {
             }
             Place::Ref(atemp, dtemp, off, tt) => {
                 if tt.is_array() || tt.is_struct() {
-                    return Err(format!(
+                    return c_err!(
                         "Cannot move value of type {} into data reg",
                         tt
-                    ));
+                    );
                 }
                 let areg = self.atemp_as_areg(atemp, instrs, n)?.0;
                 let dreg = self.opt_dtemp_as_opt_dreg(dtemp, instrs, n)?
@@ -544,14 +544,14 @@ impl FunctionEnvironment {
         instrs: &mut Vec<ValidInstruction>,
         env: &Environment,
         n: Proxy
-    ) -> Result<ProxiedAddr, String> {
+    ) -> Result<ProxiedAddr, CompilerErr> {
         match place {
             Place::Var(name) => {
                 if name.tt.is_array() || name.tt.is_struct() {
-                    return Err(format!(
+                    return c_err!(
                         "Cannot move array or struct {} into addr reg",
                         name
-                    ));
+                    );
                 }
                 let proxy: AReg = n.into();
                 let size = name.tt.get_data_size(env).unwrap();
@@ -575,10 +575,10 @@ impl FunctionEnvironment {
             }
             Place::Ref(atemp, dtemp, off, tt) => {
                 if tt.is_array() || tt.is_struct() {
-                    return Err(format!(
-                        "Cannot move value of type {} into data reg",
+                    return c_err!(
+                        "Cannot move array or struct {} into data reg",
                         tt
-                    ));
+                    );
                 }
                 let areg = self.atemp_as_areg(atemp, instrs, n)?.0;
                 let dreg = self.opt_dtemp_as_opt_dreg(dtemp, instrs, n)?
@@ -594,18 +594,18 @@ impl FunctionEnvironment {
 
         }
     }
-    fn dtemp_to_addr_mode(&self, dtemp: DTemp) -> Result<AddrMode, String> {
+    fn dtemp_to_addr_mode(&self, dtemp: DTemp) -> Result<AddrMode, CompilerErr> {
         match self.dtemp_map.get(&dtemp) {
             Some(Some(dreg)) => Ok((*dreg).into()),
             Some(None) => self.stack_item_to_addr_mode(StackItem::DTemp(dtemp)),
-            None => Err(format!("Given dtemp, D{}, was not in dreg or on stack", dtemp)),
+            None => c_err!("Given dtemp, D{}, was not in dreg or on stack", dtemp),
         }
     }
-    fn atemp_to_addr_mode(&self, atemp: ATemp) -> Result<AddrMode, String> {
+    fn atemp_to_addr_mode(&self, atemp: ATemp) -> Result<AddrMode, CompilerErr> {
         match self.atemp_map.get(&atemp) {
             Some(Some(areg)) => Ok((*areg).into()),
             Some(None) => self.stack_item_to_addr_mode(StackItem::ATemp(atemp)),
-            None => Err(format!("Given atemp, A{}, was not in areg or on stack", atemp)),
+            None => c_err!("Given atemp, A{}, was not in areg or on stack", atemp),
         }
     }
     /// If the given AddrMode is DReg, returns the DReg. Otherwise, moves the value into
@@ -616,7 +616,7 @@ impl FunctionEnvironment {
         size: DataSize,
         instrs: &mut Vec<ValidInstruction>,
         n: Proxy
-    ) -> Result<Proxied, String> {
+    ) -> Result<Proxied, CompilerErr> {
         if let AddrMode::D(dreg) = addr_mode {
             Ok((dreg, true))
         } else {
@@ -632,7 +632,7 @@ impl FunctionEnvironment {
         atemp: ATemp,
         instrs: &mut Vec<ValidInstruction>,
         n: Proxy,
-    ) -> Result<(AReg, bool), String> {
+    ) -> Result<(AReg, bool), CompilerErr> {
         match self.atemp_map.get(&atemp).unwrap() {
             Some(areg) => Ok((*areg, true)),
             None => {
@@ -656,7 +656,7 @@ impl FunctionEnvironment {
         dtemp: DTemp,
         instrs: &mut Vec<ValidInstruction>,
         n: Proxy,
-    ) -> Result<Proxied, String> {
+    ) -> Result<Proxied, CompilerErr> {
         match self.dtemp_map.get(&dtemp).unwrap() {
             Some(dreg) => Ok((*dreg, true)),
             None => {
@@ -684,7 +684,7 @@ impl FunctionEnvironment {
         dtemp: Option<DTemp>,
         instrs: &mut Vec<ValidInstruction>,
         n: Proxy,
-    ) -> Result<Option<Proxied>, String> {
+    ) -> Result<Option<Proxied>, CompilerErr> {
         dtemp
                 .map(|dtemp| self.dtemp_as_dreg(dtemp, instrs, n))
                 .transpose()

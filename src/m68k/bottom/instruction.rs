@@ -8,7 +8,7 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use crate::m68k::{DataSize, Imm};
+use crate::{m68k::{DataSize, Imm}, error::CompilerErr, c_err};
 
 use DReg::*;
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
@@ -364,7 +364,7 @@ use super::{UncalculatedStackHeight, RegisterSpaceSize};
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct ValidInstruction(Instruction);
 impl TryFrom<Instruction> for ValidInstruction {
-    type Error = String;
+    type Error = CompilerErr;
 
     fn try_from(value: Instruction) -> Result<Self, Self::Error> {
         value.validate()
@@ -454,17 +454,17 @@ pub enum Instruction {
     Lea(AddrMode, AReg),
 }
 impl Instruction {
-    pub fn validate(mut self) -> Result<ValidInstruction, String> {
+    pub fn validate(mut self) -> Result<ValidInstruction, CompilerErr> {
         match &mut self {
             Move(size, _src, dest) => {
                 match &dest {
                     AddrMode::D(_) => {}
                     AddrMode::A(_) => {
                         if *size == DataSize::Byte {
-                            return Err(format!(
+                            return c_err!(
                                 "Illegal addressing mode for Move instruction: {}",
                                 dest
-                            ))
+                            )
                         }
                     } // Moving to areg might need MOVEA instruction
                     AddrMode::AInd(_) => {}
@@ -475,17 +475,17 @@ impl Instruction {
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
                     _ => {
-                        return Err(format!(
+                        return c_err!(
                             "Illegal addressing mode for Move instruction: {}",
                             dest
-                        ));
+                        );
                     }
                 }
                 Ok(ValidInstruction(self))
             }
             MoveMRtoM(size, _regs, ea) | MoveMMtoR(size, ea, _regs) => {
                 if *size == DataSize::Byte {
-                    return Err(format!("Illegal data size for Movem instruction: {}", size));
+                    return c_err!("Illegal data size for Movem instruction: {}", size);
                 }
                 match ea {
                     AddrMode::AInd(_) => {}
@@ -495,7 +495,7 @@ impl Instruction {
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 Ok(ValidInstruction(self))
@@ -511,7 +511,7 @@ impl Instruction {
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 Ok(ValidInstruction(self))
@@ -527,7 +527,7 @@ impl Instruction {
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 Ok(ValidInstruction(self))
@@ -543,7 +543,7 @@ impl Instruction {
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 Ok(ValidInstruction(self))
@@ -559,7 +559,7 @@ impl Instruction {
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 Ok(ValidInstruction(self))
@@ -575,7 +575,7 @@ impl Instruction {
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 Ok(ValidInstruction(self))
@@ -593,7 +593,7 @@ impl Instruction {
                     AddrMode::AbsL(_) => {}
                     AddrMode::Imm(_) => {}
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 match dest {
@@ -606,14 +606,14 @@ impl Instruction {
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 if !one_data {
-                    return Err(format!(
+                    return c_err!(
                         "At least one addressing mode must be DReg: {:?}",
                         self
-                    ));
+                    );
                 }
                 Ok(ValidInstruction(self))
             }
@@ -629,7 +629,7 @@ impl Instruction {
                     AddrMode::AbsL(_) => {}
                     AddrMode::Imm(_) => {}
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 Ok(ValidInstruction(self))
@@ -652,10 +652,10 @@ impl Instruction {
                                     if *num < 1 {
                                         new_src = None;
                                     } else if *num > 8 {
-                                        return Err(format!(
+                                        return c_err!(
                                             "Shifting and rotating literals can only be [1,8]: {:?}",
                                             self
-                                        ));
+                                        );
                                     } else {
                                         new_src = Some(src.to_owned())
                                     }
@@ -664,11 +664,11 @@ impl Instruction {
                                 }
                             }
                             _ => {
-                                return Err(format!("Illegal addressing mode: {:?}", self));
+                                return c_err!("Illegal addressing mode: {:?}", self);
                             }
                         }
                         if !matches!(dest, AddrMode::D(_)) {
-                            return Err(format!("Illegal addressing mode: {:?}", self));
+                            return c_err!("Illegal addressing mode: {:?}", self);
                         }
                     }
                     None => {
@@ -683,7 +683,7 @@ impl Instruction {
                             AddrMode::AbsW(_) => {}
                             AddrMode::AbsL(_) => {}
                             _ => {
-                                return Err(format!("Illegal addressing mode: {:?}", self));
+                                return c_err!("Illegal addressing mode: {:?}", self);
                             }
                         }
                     }
@@ -703,14 +703,14 @@ impl Instruction {
                     AddrMode::AbsL(_) => {},
                     AddrMode::Imm(_) => {},
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 Ok(ValidInstruction(self))
             }
             Trap(trap) | Trapv(trap) => {
                 if *trap >= 16 {
-                    return Err(format!("Illegal trap vector: {:?}", self));
+                    return c_err!("Illegal trap vector: {:?}", self);
                 }
                 Ok(ValidInstruction(self))
             }
@@ -722,7 +722,7 @@ impl Instruction {
                     AddrMode::AbsW(_) => {}
                     AddrMode::AbsL(_) => {}
                     _ => {
-                        return Err(format!("Illegal addressing mode: {:?}", self));
+                        return c_err!("Illegal addressing mode: {:?}", self);
                     }
                 }
                 Ok(ValidInstruction(self))
