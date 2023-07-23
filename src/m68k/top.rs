@@ -7,8 +7,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::bud::{BinExpr, Expr, NonBinExpr, TypeExpr, VarDecl};
+use crate::error::*;
 use crate::logging::LoggingOptions;
 use crate::tools::ToStringCollection;
+use crate::{u_err, c_err};
 use crate::{bud, parse::Node};
 use log::*;
 
@@ -25,6 +27,14 @@ impl BudExpander {
     // This function should only be called once
     pub fn get_built_in_types() -> HashMap<TypeType, Type> {
         [
+            (
+                TypeType::Id("void".to_owned()),
+                Type {
+                    size: Either::This(0),
+                    typtyp: TypeType::Id("void".to_owned()),
+                    magic: false,
+                }
+            ),
             (
                 TypeType::Id("i8".to_owned()),
                 Type {
@@ -63,13 +73,13 @@ impl BudExpander {
         types: &mut HashSet<TypeType>,
         struct_names: &HashSet<String>,
         built_in: &HashMap<TypeType, Type>,
-    ) -> Result<(), String> {
+    ) -> Result<(), UserErr> {
         match &*expr.bin_expr {
-            BinExpr::Binary(nbe, _, be) => {
+            BinExpr::Binary(nbe, _, be, _) => {
                 Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in)?;
                 Self::get_types_in_binexpr(be, types, struct_names, built_in)
             }
-            BinExpr::NonBin(nbe) => {
+            BinExpr::NonBin(nbe, _) => {
                 Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in)
             }
         }
@@ -80,13 +90,13 @@ impl BudExpander {
         types: &mut HashSet<TypeType>,
         struct_names: &HashSet<String>,
         built_in: &HashMap<TypeType, Type>,
-    ) -> Result<(), String> {
+    ) -> Result<(), UserErr> {
         match be {
-            BinExpr::Binary(nbe, _, be) => {
+            BinExpr::Binary(nbe, _, be, _) => {
                 Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in)?;
                 Self::get_types_in_binexpr(be, types, struct_names, built_in)
             }
-            BinExpr::NonBin(nbe) => {
+            BinExpr::NonBin(nbe, _) => {
                 Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in)
             }
         }
@@ -97,65 +107,65 @@ impl BudExpander {
         types: &mut HashSet<TypeType>,
         struct_names: &HashSet<String>,
         built_in: &HashMap<TypeType, Type>,
-    ) -> Result<(), String> {
+    ) -> Result<(), UserErr> {
         match nbe {
-            NonBinExpr::BlockExpr(exprs) => exprs
+            NonBinExpr::BlockExpr(exprs, _) => exprs
                 .iter()
                 .try_for_each(|expr| Self::get_types_in_expr(expr, types, struct_names, built_in)),
-            NonBinExpr::AssignExpr(_, expr) => {
+            NonBinExpr::AssignExpr(_, expr, _) => {
                 Self::get_types_in_expr(expr, types, struct_names, built_in)
             }
-            NonBinExpr::VarDeclAssgn(typ, expr) => {
+            NonBinExpr::VarDeclAssgn(typ, expr, _) => {
                 TypeType::from_te(typ.typ.clone(), struct_names, built_in)?.add_subtypes(types);
                 Self::get_types_in_expr(expr, types, struct_names, built_in)
             }
-            NonBinExpr::ReturnExpr(expr) => {
+            NonBinExpr::ReturnExpr(expr, _) => {
                 if let Some(expr) = expr {
                     Self::get_types_in_expr(expr, types, struct_names, built_in)
                 } else {
                     Ok(())
                 }
             }
-            NonBinExpr::CleanupCall => Ok(()),
-            NonBinExpr::CleanupExpr(expr) => Self::get_types_in_expr(expr, types, struct_names, built_in),
-            NonBinExpr::IdExpr(_) => Ok(()),
-            NonBinExpr::LitExpr(lit) => {
+            NonBinExpr::CleanupCall(_) => Ok(()),
+            NonBinExpr::CleanupExpr(expr, _) => Self::get_types_in_expr(expr, types, struct_names, built_in),
+            NonBinExpr::IdExpr(_, _) => Ok(()),
+            NonBinExpr::LitExpr(lit, _) => {
                 match lit {
                     bud::Literal::Num(_) => { TypeType::Id("i32".to_owned()).add_subtypes(types); },
                     bud::Literal::Str(_) => { TypeType::Pointer(Box::new(TypeType::Id("u8".to_owned()))).add_subtypes(types); },
                 }
                 Ok(())
             }
-            NonBinExpr::ParenExpr(expr) => Self::get_types_in_expr(expr, types, struct_names, built_in),
-            NonBinExpr::UnaryExpr(_, nbe) => Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in),
-            NonBinExpr::IfExpr(expr1, expr2) => {
+            NonBinExpr::ParenExpr(expr, _) => Self::get_types_in_expr(expr, types, struct_names, built_in),
+            NonBinExpr::UnaryExpr(_, nbe, _) => Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in),
+            NonBinExpr::IfExpr(expr1, expr2, _) => {
                 Self::get_types_in_expr(expr1, types, struct_names, built_in)?;
                 Self::get_types_in_expr(expr2, types, struct_names, built_in)
             },
-            NonBinExpr::IfElse(expr1, expr2, expr3) => {
+            NonBinExpr::IfElse(expr1, expr2, expr3, _) => {
                 Self::get_types_in_expr(expr1, types, struct_names, built_in)?;
                 Self::get_types_in_expr(expr2, types, struct_names, built_in)?;
                 Self::get_types_in_expr(expr3, types, struct_names, built_in)
             },
-            NonBinExpr::UnlExpr(expr1, expr2) => {
+            NonBinExpr::UnlExpr(expr1, expr2, _) => {
                 Self::get_types_in_expr(expr1, types, struct_names, built_in)?;
                 Self::get_types_in_expr(expr2, types, struct_names, built_in)
             },
-            NonBinExpr::UnlElse(expr1, expr2, expr3) => {
+            NonBinExpr::UnlElse(expr1, expr2, expr3, _) => {
                 Self::get_types_in_expr(expr1, types, struct_names, built_in)?;
                 Self::get_types_in_expr(expr2, types, struct_names, built_in)?;
                 Self::get_types_in_expr(expr3, types, struct_names, built_in)
             },
-            NonBinExpr::WhileExpr(expr1, expr2) => {
+            NonBinExpr::WhileExpr(expr1, expr2, _) => {
                 Self::get_types_in_expr(expr1, types, struct_names, built_in)?;
                 Self::get_types_in_expr(expr2, types, struct_names, built_in)
             },
-            NonBinExpr::DoWhile(expr1, expr2) => {
+            NonBinExpr::DoWhile(expr1, expr2, _) => {
                 Self::get_types_in_expr(expr1, types, struct_names, built_in)?;
                 Self::get_types_in_expr(expr2, types, struct_names, built_in)
             },
-            NonBinExpr::Break => Ok(()),
-            NonBinExpr::Continue => Ok(()),
+            NonBinExpr::Break(_) => Ok(()),
+            NonBinExpr::Continue(_) => Ok(()),
         }
     }
 
@@ -163,7 +173,7 @@ impl BudExpander {
         funcs: &Vec<(VarDecl, Vec<VarDecl>, Box<Expr>)>,
         struct_names: &HashSet<String>,
         built_in: &HashMap<TypeType, Type>,
-    ) -> Result<HashSet<TypeType>, String> {
+    ) -> Result<HashSet<TypeType>, UserErr> {
         let mut types = HashSet::new();
         for (_, args, expr) in funcs {
             for arg in args {
@@ -178,19 +188,27 @@ impl BudExpander {
         &self,
         log_options: &LoggingOptions,
         tree: Node<bud::BudTerminal, bud::BudNonTerminal>,
-    ) -> Result<Environment, String> {
+    ) -> Result<Environment, Vec<(BudErr, Option<String>)>> {
+        impl From<BudErr> for Vec<(BudErr, Option<String>)> {
+            fn from(value: BudErr) -> Self {
+                vec![(value, None)]
+            }
+        }
         // Get Items
         let children;
-        if let Node::NonTm(bud::BudNonTerminal::Items, children_) = tree {
+        let range;
+        if let Node::NonTm{ n: bud::BudNonTerminal::Items, children: children_, range: range_ } = tree {
             children = children_;
+            range = range_;
         } else {
-            return Err(format!(
+            let err: Result<_, BudErr> = c_err!(tree.get_range(),
                 "Invalid node for {} {:?}",
                 bud::BudNonTerminal::Items,
                 tree
-            ));
+            );
+            return Ok(err?);
         }
-        let items = bud::Item::news(&children)?;
+        let items = bud::Item::news(&children, range)?;
 
         // Separate items into funcs, structs, and imports
         let mut funcs = Vec::new();
@@ -200,14 +218,14 @@ impl BudExpander {
 
         for item in items {
             match item {
-                bud::Item::FuncDecl(name, args, expr) => {
+                bud::Item::FuncDecl(name, args, expr, _) => {
                     func_names.push(name.id.clone());
                     funcs.push((name, args, expr));
                 }
-                bud::Item::StructDecl(name, fields) => {
+                bud::Item::StructDecl(name, fields, _) => {
                     structs.push((name, fields));
                 }
-                bud::Item::ImportDecl(path) => imports.push(path),
+                bud::Item::ImportDecl(path, _) => imports.push(path),
             }
         }
 
@@ -224,27 +242,23 @@ impl BudExpander {
                 });
             debug!("End types found");
         }
-        let mut num_errors = 0;
         if log_options.print_inter_funcs {
             debug!("Funcs: {:?}", funcs.iter().map(|x| x.0.to_owned()).collect::<Vec<String>>());
         }
 
         // Compile all funcs
+        let mut errors = Vec::new();
         for (name, func) in funcs {
             match func.compile(log_options, &environment) {
                 Ok(cfunc) => environment.compiled_funcs.push(cfunc),
-                Err(msg) => {
-                    error!("In function {},", name);
-                    error!("{}", msg);
-                    num_errors += 1;
-                }
+                Err(err) => errors.push((err, Some(name))),
             };
         }
         if log_options.print_inter_funcs {
             debug!("End inter funcs");
         }
-        if num_errors != 0 {
-            return Err(format!("Unable to compile all functions because of errors in {} functions", num_errors));
+        if !errors.is_empty() {
+            return Err(errors);
         }
 
         Ok(environment)
@@ -301,7 +315,7 @@ impl TypeSizeGenerator {
         size_generators: &mut HashMap<TypeType, TypeSizeGenerator>,
         index: TypeType,
         top: TypeType,
-    ) -> Result<TypeSize, String> {
+    ) -> Result<TypeSize, BudErr> {
         match size_generators.get_mut(&index) {
             Some(TypeSizeGenerator {
                 state: TypeSizeState::Calculated(size),
@@ -312,10 +326,10 @@ impl TypeSizeGenerator {
             Some(TypeSizeGenerator {
                 state: TypeSizeState::BeingCalculated,
                 tt: _,
-            }) => Err(format!(
+            }) => u_err!(
                 "In calculating size for type {}, encountered type loop with type {}",
                 top, index
-            )),
+            ),
             Some(generator) => {
                 match &mut generator.tt {
                     TypeType::Pointer(subtyp) => {
@@ -335,7 +349,7 @@ impl TypeSizeGenerator {
                     }
                     TypeType::Id(name) => {
                         // Must be a built-in type
-                        Err(format!("Built-in types must have their sizes predefined, but type {} did not have a defined size", name))
+                        c_err!("Built-in types must have their sizes predefined, but type {} did not have a defined size", name)
                     }
                     TypeType::Struct(_, Some(fields)) => {
                         let fields = fields.clone();
@@ -353,7 +367,7 @@ impl TypeSizeGenerator {
                                 let (Either::This(size) | Either::That((size, _))) = size;
                                 Ok(size)
                             })
-                            .collect::<Result<Vec<u32>, String>>()?;
+                            .collect::<Result<Vec<u32>, BudErr>>()?;
                         let (layout, size) = Environment::get_struct_layout_from_sizes(&sizes);
                         let fields = fields
                             .iter()
@@ -368,13 +382,13 @@ impl TypeSizeGenerator {
                             .collect();
                         Ok(Either::That((size, fields)))
                     }
-                    TypeType::Struct(name, None) => Err(format!(
+                    TypeType::Struct(name, None) => c_err!(
                         "Struct {} not initialized with fields before calling get_size on type {}",
                         name, top
-                    )),
+                    ),
                 }
             }
-            None => Err(format!("Type not found: {}", index)),
+            None => c_err!("Type not found: {}", index),
         }
     }
 }
@@ -393,7 +407,7 @@ impl Environment {
         structs: Vec<(String, Vec<VarDecl>)>,
         mut built_in: HashMap<TypeType, Type>,
         funcs: Vec<(VarDecl, Vec<VarDecl>, Box<Expr>)>,
-    ) -> Result<(Environment, Vec<(String, Function)>), String> {
+    ) -> Result<(Environment, Vec<(String, Function)>), BudErr> {
         if log_options.print_types_trace {
             debug!("Types:");
         }
@@ -419,7 +433,7 @@ impl Environment {
                             let field = Field { name: name.to_owned(), tt };
                             Ok(field)
                         })
-                        .collect::<Result<Vec<Field>, String>>()?,
+                        .collect::<Result<Vec<Field>, UserErr>>()?,
                 ),
             ));
         }
@@ -486,13 +500,13 @@ impl Environment {
                         ))
                     }
                 } else {
-                    Err(format!(
+                    c_err!(
                         "get_size did not calculate the size for {}",
                         tt
-                    ))
+                    )
                 }
             })
-            .collect::<Result<HashMap<TypeType, Type>, String>>()?;
+            .collect::<Result<HashMap<TypeType, Type>, BudErr>>()?;
         
         let mut structs = HashMap::new();
         for tt in types.keys() {
@@ -501,15 +515,15 @@ impl Environment {
             }
         }
         let mut env = Environment { types, structs, global_funcs: HashMap::new(), compiled_funcs: Vec::new() };
-        let funcs = funcs
+        let funcs: Vec<(String, Function)> = funcs
             .into_iter()
             .map(|(name, args, expr)| {
-                Ok((
+                (
                     name.id.to_owned(),
-                    Function::new(name, args, *expr, &env)?
-                ))
+                    Function::new(name, args, *expr, &env)
+                )
             })
-            .collect::<Result<Vec<(String, Function)>, String>>()?;
+            .collect();
         for (name, func) in &funcs {
             env.global_funcs.insert(name.clone(), func.signature.clone());
         }
@@ -535,10 +549,10 @@ impl Environment {
         (layout, position)
     }
 
-    fn check_type_size(tt: TypeType, size: &Either<u32, (u32, HashMap<String, (u32, TypeType)>)>) -> Result<(), String> {
+    fn check_type_size(tt: TypeType, size: &Either<u32, (u32, HashMap<String, (u32, TypeType)>)>) -> Result<(), UserErr> {
         let (Either::This(size) | Either::That((size, _))) = size;
         if *size > i32::MAX as u32 {
-            Err(format!("Type {} is too big. Max size is {}, but {} has size of {}", tt, i32::MAX, tt, size))
+            u_err!("Type {} is too big. Max size is {}, but {} has size of {}", tt, i32::MAX, tt, size)
         } else {
             Ok(())
         }
@@ -612,25 +626,25 @@ impl TypeType {
         typ: TypeExpr,
         struct_names: &HashSet<String>,
         built_in: &HashMap<TypeType, Type>,
-    ) -> Result<TypeType, String> {
+    ) -> Result<TypeType, UserErr> {
         match typ {
-            TypeExpr::Id(id) => {
+            TypeExpr::Id(id, range) => {
                 if struct_names.contains(&id) {
                     Ok(TypeType::Struct(id, None))
                 } else if built_in.contains_key(&TypeType::Id(id.clone())) {
                     Ok(TypeType::Id(id))
                 } else {
-                    Err(format!("Type {} not found in structs or built-ins", id))
+                    u_err!(range, "Type {} not found in structs or built-ins", id)
                 }
             }
-            TypeExpr::TypSqr(typ, sqr) => {
+            TypeExpr::TypSqr(typ, sqr, _) => {
                 let mut typ = TypeType::from_te(*typ, struct_names, built_in)?;
                 for length in sqr {
                     typ = TypeType::Array(Box::new(typ), length);
                 }
                 Ok(typ)
             }
-            TypeExpr::Pointer(typ) => Ok(TypeType::Pointer(Box::new(TypeType::from_te(
+            TypeExpr::Pointer(typ, _) => Ok(TypeType::Pointer(Box::new(TypeType::from_te(
                 *typ,
                 struct_names,
                 built_in,
@@ -639,21 +653,21 @@ impl TypeType {
     }
     pub fn new(typ: TypeExpr, environment: &Environment) -> TypeType {
         match typ {
-            TypeExpr::Id(id) => {
+            TypeExpr::Id(id, _) => {
                 if environment.structs.contains_key(&id) {
                     environment.structs.get(&id).unwrap().clone()
                 } else {
                     TypeType::Id(id)
                 }
             },
-            TypeExpr::TypSqr(typ, sqr) => {
+            TypeExpr::TypSqr(typ, sqr, _) => {
                 let mut tt = TypeType::new(*typ, environment);
                 for len in sqr {
                     tt = TypeType::Array(Box::new(tt), len);
                 }
                 tt
             }
-            TypeExpr::Pointer(typ) => TypeType::Pointer(
+            TypeExpr::Pointer(typ, _) => TypeType::Pointer(
                 Box::new(TypeType::new(*typ, environment))
             ),
         }
@@ -711,7 +725,7 @@ pub struct Function {
     pub expr: Expr,
 }
 impl Function {
-    pub fn new(name: VarDecl, args: Vec<VarDecl>, expr: Expr, environment: &Environment) -> Result<Function, String> {
+    pub fn new(name: VarDecl, args: Vec<VarDecl>, expr: Expr, environment: &Environment) -> Function {
         let name = Field::new(name, environment);
         let args = args
             .into_iter()
@@ -719,12 +733,12 @@ impl Function {
                 Field::new(arg, environment)
             })
             .collect();
-        Ok(Function {
+        Function {
             signature: Signature { name, args },
             expr,
-        })
+        }
     }
-    pub fn compile(self, log_options: &LoggingOptions, env: &Environment) -> Result<CompiledFunction, String> {
+    pub fn compile(self, log_options: &LoggingOptions, env: &Environment) -> Result<CompiledFunction, BudErr> {
         let (instrs, fienv) = get_inter_instrs(self.expr, &self.signature, log_options, env)?;
         let instrs = get_instrs(instrs, fienv, env)?;
         let cfunc = CompiledFunction{ signature: self.signature, instructions: instrs };

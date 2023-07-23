@@ -3,21 +3,17 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use crate::m68k::*;
+use crate::{m68k::*, error::*, c_err};
 
 use log::*;
-
-use super::condition::*;
 
 use Instruction::*;
 use Proxy::*;
 use DataSize::*;
-use NumOrLbl::Num;
-use ADReg::*;
 use AReg::SP;
 use Either::*;
 
-pub fn compile_mova_iinstr(name: String, to: Place, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_mova_iinstr(name: String, to: Place, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
     // Only get the destination as AReg if it is already AReg
     let (to_areg, live) = if fenv.place_is_areg(&to) {
         fenv.place_to_areg(to.clone(), instrs, env, Proxy1)?
@@ -35,7 +31,7 @@ pub fn compile_mova_iinstr(name: String, to: Place, instrs: &mut Vec<ValidInstru
     Ok(())
 }
 
-pub fn compile_movs_iinstr(string_lbl: usize, to: Place, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
+pub fn compile_movs_iinstr(string_lbl: usize, to: Place, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     let from = NumOrLbl::Lbl(string_lbl).into();
     let to = fenv.place_to_addr_mode(to, instrs, Proxy1)?;
     let instr = Move(LWord, from, to).validate()?;
@@ -43,7 +39,7 @@ pub fn compile_movs_iinstr(string_lbl: usize, to: Place, instrs: &mut Vec<ValidI
     Ok(())
 }
 
-pub fn compile_push_iinstr(from: Place, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), String> {
+pub fn compile_push_iinstr(from: Place, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
     // `This` if should use loop; `That` if can push in one instruction
     let from_addr_mode: Either<((NumOrLbl, AReg, Option<DReg>), u32), (AddrMode, DataSize)>;
     match from {
@@ -58,7 +54,7 @@ pub fn compile_push_iinstr(from: Place, instrs: &mut Vec<ValidInstruction>, fenv
                     }
                     from_addr_mode = This(((off, a, None), size));
                 } else {
-                    return Err(format!("`fenv.var_as_addr_mode()` is guaranteed to return `AIndDisp(NumOrLbl, AReg)`, but it returned {:?}", addr_mode));
+                    return c_err!("`fenv.var_as_addr_mode()` is guaranteed to return `AIndDisp(NumOrLbl, AReg)`, but it returned {:?}", addr_mode);
                 }
             } else if field.tt.is_void() {
                 return Ok(());
@@ -93,7 +89,7 @@ pub fn compile_push_iinstr(from: Place, instrs: &mut Vec<ValidInstruction>, fenv
         }
         Place::DTemp(dtemp, tt) => {
             if tt.is_array() || tt.is_struct() {
-                return Err(format!("Array or struct, {}, stored in dtemp D{}", tt, dtemp));
+                return c_err!("Array or struct, {}, stored in dtemp D{}", tt, dtemp);
             } else if tt.is_void() {
                 return Ok(())
             } else {
@@ -127,7 +123,7 @@ pub fn compile_push_iinstr(from: Place, instrs: &mut Vec<ValidInstruction>, fenv
     Ok(())
 }
 
-pub fn compile_puva_iinstr(name: String, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
+pub fn compile_puva_iinstr(name: String, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     // Only get the destination as AReg if it is already AReg
     let from = fenv.var_as_addr_mode(name)?;
     let instr = Pea(from).validate()?;
@@ -135,20 +131,20 @@ pub fn compile_puva_iinstr(name: String, instrs: &mut Vec<ValidInstruction>, fen
     Ok(())
 }
 
-pub fn compile_pusi_iinstr(imm: Imm, size: DataSize, instrs: &mut Vec<ValidInstruction>) -> Result<(), String> {
+pub fn compile_pusi_iinstr(imm: Imm, size: DataSize, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Move(size, imm.into(), AddrMode::get_push()).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_puss_iinstr(string_lbl: usize, instrs: &mut Vec<ValidInstruction>) -> Result<(), String> {
+pub fn compile_puss_iinstr(string_lbl: usize, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let from = NumOrLbl::Lbl(string_lbl).into();
     let instr = Move(LWord, from, AddrMode::get_push()).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_pea_iinstr(atemp: ATemp, dtemp: Option<DTemp>, off: Imm, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
+pub fn compile_pea_iinstr(atemp: ATemp, dtemp: Option<DTemp>, off: Imm, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     let areg = fenv.atemp_as_areg(atemp, instrs, Proxy1)?.0;
     let dreg = fenv.opt_dtemp_as_opt_dreg(dtemp, instrs, Proxy1)?
             .map(|dreg| dreg.0);
@@ -166,7 +162,7 @@ pub fn compile_grs_iinstr(rs_lbl: RegisterSpaceLbl, fenv: &mut FunctionEnvironme
     fenv.add_rs_lbl(rs_lbl);
 }
 
-pub fn compile_save_iinstr(rs_lbl: RegisterSpaceLbl, temps: &[ADTemp], instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
+pub fn compile_save_iinstr(rs_lbl: RegisterSpaceLbl, temps: &[ADTemp], instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     // Assume we save all 4 bytes of all used regs, even if not all the bytes are being used
     // This isn't necessary, but it would make the process way more complicated to think
     // about varying-sized regs
@@ -179,7 +175,7 @@ pub fn compile_save_iinstr(rs_lbl: RegisterSpaceLbl, temps: &[ADTemp], instrs: &
     Ok(())
 }
 
-pub fn compile_call_iinstr(name: String, smarker_lbl: StackMarker, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), String> {
+pub fn compile_call_iinstr(name: String, smarker_lbl: StackMarker, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     let instr = Jsr(name).validate()?;
     instrs.push(instr);
     let smarker_addr = fenv.move_esh_to_smarker(smarker_lbl)?;

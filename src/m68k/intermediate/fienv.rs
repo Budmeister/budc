@@ -14,9 +14,9 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use std::{ops::RangeFrom, rc::Rc, collections::HashSet};
+use std::ops::{RangeFrom, Range};
 
-use crate::m68k::*;
+use crate::{m68k::*, error::*, u_err, c_err_opt, u_err_opt};
 
 use log::*;
 
@@ -72,9 +72,9 @@ impl FunctionInterEnvironment {
     /// Data temps compile to data registers, so this function fails if the given type is a large type (size > 4 bytes).
     /// Arrays and structs cannot be stored in data registers, either, so this function will fail if the given type array or struct.
     /// However, it is not the case that only magic types can be stored in data temps, since pointers are not magic.
-    pub fn get_data_temp(&mut self, tt: TypeType) -> Result<usize, String> {
+    pub fn get_data_temp(&mut self, tt: TypeType, range: Option<Range<usize>>) -> Result<usize, CompilerErr> {
         if tt.is_array() || tt.is_struct() {
-            return Err(format!("Cannot store arrays or structs in data temps. TypeType {} given", tt));
+            return c_err_opt!(range, "Cannot store arrays or structs in data temps. TypeType {} given", tt);
         }
         // If a data temp is available, give it out
         for (temp, used) in self.dtemps.iter_mut().enumerate() {
@@ -88,17 +88,17 @@ impl FunctionInterEnvironment {
         Ok(place)
     }
     // Addr temps can point to anything
-    pub fn get_addr_temp(&mut self) -> Result<usize, String> {
+    pub fn get_addr_temp(&mut self) -> usize {
         // If a addr temp is available, give it out
         for (temp, used) in self.atemps.iter_mut().enumerate() {
             if !*used {
                 *used = true;
-                return Ok(temp);
+                return temp;
             }
         }
         let place = self.atemps.len();
         self.atemps.push(true);
-        Ok(place)
+        place
     }
     fn _free_temp(temps: &mut Vec<bool>, temp: usize, label: &str) {
         if temp < temps.len() {
@@ -143,14 +143,14 @@ impl FunctionInterEnvironment {
     pub fn has_var(&self, name: &String) -> bool {
         matches!(self.get_var(name), Some(_))
     }
-    pub fn add_var(&mut self, field: &Field) -> Result<(), String> {
+    pub fn add_var(&mut self, field: &Field) -> Result<(), UserErr> {
         if let Some(existing_field) = self.get_var(&field.name) {
             if existing_field.tt == field.tt {
                 // Var already exists, so do nothing
                 Ok(())
             } else {
                 // Var exists with a different type
-                Err(format!("Cannot create var {}, because var {} already exists", field, existing_field))
+                u_err!("Cannot create var {}, because var {} already exists", field, existing_field)
             }
         } else {
             self.vars.push(field.clone());
@@ -183,50 +183,50 @@ impl FunctionInterEnvironment {
         }
         temps.into_boxed_slice()
     }
-    pub fn ret(&mut self, place: Place, instrs: &mut Vec<InterInstr>, env: &Environment) -> Result<(), String> {
+    pub fn ret(&mut self, place: Place, instrs: &mut Vec<InterInstr>, env: &Environment, range: Option<Range<usize>>) -> Result<(), UserErr> {
         let tt = place.get_type();
         if tt != self.return_type() {
-            return Err(format!("Function has return type {} but tried to return object of type {}", self.return_type(), tt));
+            return u_err_opt!(range, "Function has return type {} but tried to return object of type {}", self.return_type(), tt);
         }
-        let to = env.ret_place(self.get_name())?;
+        let to = env.ret_place(self.get_name(), range)?;
         let instr = InterInstr::Move(place, to);
         instrs.push(instr);
         let instr = InterInstr::Rts;
         instrs.push(instr);
         Ok(())
     }
-    pub fn reti(&mut self, imm: Imm, instrs: &mut Vec<InterInstr>, env: &Environment) -> Result<(), String> {
-        let to = env.ret_place(self.get_name())?;
+    pub fn reti(&mut self, imm: Imm, instrs: &mut Vec<InterInstr>, env: &Environment, range: Option<Range<usize>>) -> Result<(), UserErr> {
+        let to = env.ret_place(self.get_name(), range)?;
         let instr = InterInstr::Movi(imm, to);
         instrs.push(instr);
         let instr = InterInstr::Rts;
         instrs.push(instr);
         Ok(())
     }
-    pub fn rets(&mut self, string: usize, instrs: &mut Vec<InterInstr>, env: &Environment) -> Result<(), String> {
+    pub fn rets(&mut self, string: usize, instrs: &mut Vec<InterInstr>, env: &Environment, range: Option<Range<usize>>) -> Result<(), UserErr> {
         let tt = Environment::get_str_tt();
         if tt != self.return_type() {
-            return Err(format!("Function has return type {} but tried to return literal string of type {}", self.return_type(), tt));
+            return u_err_opt!(range, "Function has return type {} but tried to return literal string of type {}", self.return_type(), tt);
         }
-        let to = env.ret_place(self.get_name())?;
+        let to = env.ret_place(self.get_name(), range)?;
         let instr = InterInstr::Movs(string, to);
         instrs.push(instr);
         let instr = InterInstr::Rts;
         instrs.push(instr);
         Ok(())
     }
-    pub fn retva(&mut self, name: &String, instrs: &mut Vec<InterInstr>, env: &Environment) -> Result<(), String> {
+    pub fn retva(&mut self, name: &String, instrs: &mut Vec<InterInstr>, env: &Environment, range: Option<Range<usize>>) -> Result<(), UserErr> {
         let var = match self.get_var(name) {
             Some(name) => name,
             None => {
-                return Err(format!("Trying to return pointer to local variable {} which does not exist", name));
+                return u_err_opt!(range, "Trying to return pointer to local variable {} which does not exist", name);
             }
         };
         let tt = TypeType::Pointer(Box::new(var.tt.clone()));
         if tt != self.return_type() {
-            return Err(format!("Function has return type {} but tried to return pointer to local variable {} of type {}", self.return_type(), var.name, var.tt));
+            return u_err_opt!(range, "Function has return type {} but tried to return pointer to local variable {} of type {}", self.return_type(), var.name, var.tt);
         }
-        let to = env.ret_place(self.get_name())?;
+        let to = env.ret_place(self.get_name(), range)?;
         let instr = InterInstr::MoVA(var.name, to);
         instrs.push(instr);
         let instr = InterInstr::Rts;

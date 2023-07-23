@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::m68k::*;
+use crate::{m68k::*, error::*};
 
 use bottom::{instruction::*, fenv::{FunctionEnvironment, Proxy}};
 use super::*;
@@ -26,7 +26,7 @@ pub fn get_instrs(
     iinstrs: Vec<InterInstr>,
     fienv: FunctionInterEnvironment,
     env: &Environment,
-) -> Result<Vec<ValidInstruction>, String> {
+) -> Result<Vec<ValidInstruction>, BudErr> {
     let mut instrs = Vec::new();
     let (dtemp_map, atemp_map) = get_temp_maps(&iinstrs);
     let mut fenv = FunctionEnvironment::new(
@@ -189,7 +189,7 @@ pub fn extend(
     from: DataSize,
     to: DataSize,
     instrs: &mut Vec<ValidInstruction>,
-) -> Result<(), String> {
+) -> Result<(), CompilerErr> {
     if from >= to {
         return Ok(());
     }
@@ -216,7 +216,7 @@ pub fn extend_efficient(
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
     n: Proxy,
-) -> Result<(AddrMode, bool), String> {
+) -> Result<(AddrMode, bool), CompilerErr> {
     if from >= to {
         Ok((addr_mode, true))
     } else {
@@ -230,7 +230,7 @@ pub fn compile_iinstr(
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
     env: &Environment,
-) -> Result<(), String> {
+) -> Result<(), BudErr> {
     match iinstr {
         InterInstr::Binop(src, b, dest) => compile_binop_iinstr(src, b, dest, instrs, fenv, env),
         InterInstr::Binopi(imm, b, dest) => compile_binopi_iinstr(imm, b, dest, instrs, fenv, env),

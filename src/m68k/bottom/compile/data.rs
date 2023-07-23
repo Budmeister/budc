@@ -3,7 +3,7 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use crate::m68k::*;
+use crate::{m68k::*, c_err, error::*};
 
 use log::*;
 
@@ -20,10 +20,10 @@ pub fn compile_neg_iinstr(
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
     env: &Environment,
-) -> Result<(), String> {
+) -> Result<(), BudErr> {
     let tt = src.get_type();
     if tt.is_array() || tt.is_struct() {
-        return Err(format!("Cannot negate value of type {}", tt));
+        return c_err!("Cannot negate value of type {}", tt);
     }
     let size = tt.get_data_size(env).unwrap();
     let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
@@ -37,10 +37,10 @@ pub fn compile_bnot_iinstr(
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
     env: &Environment,
-) -> Result<(), String> {
+) -> Result<(), BudErr> {
     let tt = src.get_type();
     if tt.is_array() || tt.is_struct() {
-        return Err(format!("Cannot find NOT of value of type {}", tt));
+        return c_err!("Cannot find NOT of value of type {}", tt);
     }
     let size = tt.get_data_size(env).unwrap();
     let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
@@ -56,7 +56,7 @@ pub fn compile_move_iinstr(
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
     env: &Environment,
-) -> Result<(), String> {
+) -> Result<(), BudErr> {
     // Move using dest type
     let src_tt = src.get_type();
     let dest_tt = dest.get_type();
@@ -80,17 +80,17 @@ pub fn compile_move_iinstr(
             instrs.push(instr);
             Ok(())
         } else {
-            Err(format!("Cannot move from value of type {} to value of type {}. {} has size {}, which is smaller than {} of size {}", src_tt, dest_tt, src_tt, src_size, dest_tt, dest_size))
+            c_err!("Cannot move from value of type {} to value of type {}. {} has size {}, which is smaller than {} of size {}", src_tt, dest_tt, src_tt, src_size, dest_tt, dest_size)
         }
     } else if dest_tt.is_array() || dest_tt.is_struct() {
         // algorithm to copy bytes
         // Arrays and structs should not be stored in registers
         match src {
             AddrMode::D(dreg) => {
-                return Err(format!("Arrays and structs should not be stored in data registers, but value of type {} was stored in {}", src_tt, dreg));
+                return c_err!("Arrays and structs should not be stored in data registers, but value of type {} was stored in {}", src_tt, dreg);
             }
             AddrMode::A(areg) => {
-                return Err(format!("Arrays and structs should not be stored in addr registers, but value of type {} was stored in {}", src_tt, areg));
+                return c_err!("Arrays and structs should not be stored in addr registers, but value of type {} was stored in {}", src_tt, areg);
             }
             AddrMode::AIndInc(_) => {
                 panic!("This AddrMode came from a place, and places can't be AIndInc")
@@ -106,10 +106,10 @@ pub fn compile_move_iinstr(
         instrs.push(instr);
         match dest {
             AddrMode::D(dreg) => {
-                return Err(format!("Arrays and structs should not be stored in data registers, but value of type {} was stored in {}", src_tt, dreg));
+                return c_err!("Arrays and structs should not be stored in data registers, but value of type {} was stored in {}", src_tt, dreg);
             }
             AddrMode::A(areg) => {
-                return Err(format!("Arrays and structs should not be stored in addr registers, but value of type {} was stored in {}", src_tt, areg));
+                return c_err!("Arrays and structs should not be stored in addr registers, but value of type {} was stored in {}", src_tt, areg);
             }
             AddrMode::AIndInc(_) => {
                 panic!("This AddrMode came from a place, and places can't be AIndInc")
@@ -159,14 +159,14 @@ pub fn compile_movi_iinstr(
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
     env: &Environment,
-) -> Result<(), String> {
+) -> Result<(), BudErr> {
     // Assigning to pointers will have been warned before this point
     if to.is_array() || to.is_struct() || to.is_void() {
-        return Err(format!(
+        return c_err!(
             "Cannot assign immediate value {} to value of type {}",
             imm,
             to.get_type()
-        ));
+        );
     }
     let size = to.get_data_size(env).unwrap();
     let to = fenv.place_to_addr_mode(to, instrs, Proxy1)?;
@@ -182,7 +182,7 @@ pub fn compile_lea_iinstr(
     to: ATemp,
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
-) -> Result<(), String> {
+) -> Result<(), BudErr> {
     let areg = fenv.atemp_as_areg(atemp, instrs, Proxy1)?.0;
     let dreg = fenv.opt_dtemp_as_opt_dreg(dtemp, instrs, Proxy1)?
             .map(|dreg| dreg.0);

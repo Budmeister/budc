@@ -14,7 +14,9 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use crate::{bud::*, m68k::*};
+use std::ops::Range;
+
+use crate::{bud::*, m68k::*, error::*, u_err, u_err_opt};
 
 use super::{fienv::*, place::*, inter_instr::*};
 
@@ -22,74 +24,74 @@ use log::*;
 
 
 impl Expr {
-    pub fn type_preference(&self, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, String> {
+    pub fn type_preference(&self, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, UserErr> {
         self.bin_expr.type_preference(fienv, env)
     }
 }
 
 impl BinExpr {
-    pub fn type_preference(&self, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, String> {
-        let (BinExpr::Binary(nbe, _, _) | BinExpr::NonBin(nbe)) = self;
+    pub fn type_preference(&self, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, UserErr> {
+        let (BinExpr::Binary(nbe, _, _, _) | BinExpr::NonBin(nbe, _)) = self;
         nbe.type_preference(fienv, env)
     }
 }
 
 impl NonBinExpr {
-    pub fn type_preference(&self, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, String> {
+    pub fn type_preference(&self, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, UserErr> {
         match self {
-            NonBinExpr::BlockExpr(exprs) => {
+            NonBinExpr::BlockExpr(exprs, _) => {
                 match exprs.last() {
                     Some(expr) => expr.type_preference(fienv, env),
                     None => Ok(Environment::get_void_tt()),
                 }
             },
-            NonBinExpr::AssignExpr(id, _) => IdExpr::id_to_tt(IdExpr::clone(id), fienv, env),
-            NonBinExpr::VarDeclAssgn(vd, _) => {
+            NonBinExpr::AssignExpr(id, _, _) => IdExpr::id_to_tt(IdExpr::clone(id), fienv, env),
+            NonBinExpr::VarDeclAssgn(vd, _, _) => {
                 let field = Field::new(VarDecl::clone(vd), env);
                 Ok(field.tt)
             },
-            NonBinExpr::ReturnExpr(_) => Ok(Environment::get_void_tt()),
-            NonBinExpr::CleanupCall => Ok(Environment::get_void_tt()),
-            NonBinExpr::CleanupExpr(_) => Ok(Environment::get_void_tt()),
-            NonBinExpr::IdExpr(id) => IdExpr::id_to_tt(IdExpr::clone(id), fienv, env),
-            NonBinExpr::LitExpr(_) => Ok(TypeType::Id("i32".to_owned())),
-            NonBinExpr::ParenExpr(expr) => expr.type_preference(fienv, env),
-            NonBinExpr::UnaryExpr(_, expr) => expr.type_preference(fienv, env),
-            NonBinExpr::IfExpr(_, _) => Ok(Environment::get_void_tt()),
-            NonBinExpr::IfElse(_, expr, _) => expr.type_preference(fienv, env),         // If the expressions don't agree, then
-            NonBinExpr::UnlExpr(_, _) => Ok(Environment::get_void_tt()),                            // the error will be thrown when the 
-            NonBinExpr::UnlElse(_, expr, _) => expr.type_preference(fienv, env),        // `if` or `unless` is compiles
-            NonBinExpr::WhileExpr(_, _) => Ok(Environment::get_void_tt()),
-            NonBinExpr::DoWhile(_, expr) => expr.type_preference(fienv, env),
-            NonBinExpr::Break => Ok(Environment::get_void_tt()),
-            NonBinExpr::Continue => Ok(Environment::get_void_tt()),
+            NonBinExpr::ReturnExpr(_, _) => Ok(Environment::get_void_tt()),
+            NonBinExpr::CleanupCall(_) => Ok(Environment::get_void_tt()),
+            NonBinExpr::CleanupExpr(_, _) => Ok(Environment::get_void_tt()),
+            NonBinExpr::IdExpr(id, _) => IdExpr::id_to_tt(IdExpr::clone(id), fienv, env),
+            NonBinExpr::LitExpr(_, _) => Ok(TypeType::Id("i32".to_owned())),
+            NonBinExpr::ParenExpr(expr, _) => expr.type_preference(fienv, env),
+            NonBinExpr::UnaryExpr(_, expr, _) => expr.type_preference(fienv, env),
+            NonBinExpr::IfExpr(_, _, _) => Ok(Environment::get_void_tt()),
+            NonBinExpr::IfElse(_, expr, _, _) => expr.type_preference(fienv, env),         // If the expressions don't agree, then
+            NonBinExpr::UnlExpr(_, _, _) => Ok(Environment::get_void_tt()),                            // the error will be thrown when the 
+            NonBinExpr::UnlElse(_, expr, _, _) => expr.type_preference(fienv, env),        // `if` or `unless` is compiles
+            NonBinExpr::WhileExpr(_, _, _) => Ok(Environment::get_void_tt()),
+            NonBinExpr::DoWhile(_, expr, _) => expr.type_preference(fienv, env),
+            NonBinExpr::Break(_) => Ok(Environment::get_void_tt()),
+            NonBinExpr::Continue(_) => Ok(Environment::get_void_tt()),
         }
     }
 
 }
 impl IdExpr {
     /// Gets the TypeType of this IdExpr
-    pub fn id_to_tt(id: IdExpr, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, String> {
+    pub fn id_to_tt(id: IdExpr, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, UserErr> {
         match id {
-            IdExpr::SquareIndex(expr, _offset) => {
+            IdExpr::SquareIndex(expr, _offset, range) => {
                 // TODO Handle struct member access here, too
                 let tt = expr.type_preference(fienv, env)?;
                 if let TypeType::Array(tt, _) = tt {
                     Ok(*tt)
                 } else {
-                    Err(format!("Cannot index into non-array type. Struct member access has not been implemented yet."))
+                    u_err!(range, "Cannot index into non-array type. Struct member access has not been implemented yet.")
                 }
             }
-            IdExpr::RoundIndex(expr, _) => {
+            IdExpr::RoundIndex(expr, _, range) => {
                 warn!("Round indexing not yet implemented");
                 let tt = expr.type_preference(fienv, env)?;
                 if let TypeType::Array(tt, _) = tt {
                     Ok(*tt)
                 } else {
-                    Err(format!("Cannot index into non-array type. Struct member access has not been implemented yet."))
+                    u_err!(range, "Cannot index into non-array type. Struct member access has not been implemented yet.")
                 }
             }
-            IdExpr::Deref(id) => {
+            IdExpr::Deref(id, range) => {
                 let tt = IdExpr::id_to_tt(*id, fienv, env)?;
                 match tt {
                     TypeType::Pointer(tt) => Ok(*tt),
@@ -97,18 +99,18 @@ impl IdExpr {
                         let field = fienv.get_var(&name);
                         match field {
                             Some(Field { tt , name: _ }) => Ok(tt),
-                            _ => Err(format!("Unknown id {}", name))
+                            _ => u_err!(range, "Unknown id {}", name)
                         }
                     }
-                    TypeType::Array(_, _) => Err(format!("Cannot dereference array")),
-                    TypeType::Struct(name, _) => Err(format!("Cannot dereference struct {}", name)),
+                    TypeType::Array(_, _) => u_err!(range, "Cannot dereference array"),
+                    TypeType::Struct(name, _) => u_err!(range, "Cannot dereference struct {}", name),
                 }
             }
-            IdExpr::Id(name) => {
+            IdExpr::Id(name, range) => {
                 if let Some(Field { tt, name: _ }) = fienv.get_var(&name) {
                     Ok(tt)
                 } else {
-                    Err(format!("Unknown id {}", name))
+                    u_err!(range, "Unknown id {}", name)
                 }
             }
         }
@@ -116,14 +118,14 @@ impl IdExpr {
 }
 
 impl Environment {
-    pub fn ret_place(&self, name: String) -> Result<Place, String> {
+    pub fn ret_place(&self, name: String, range: Option<Range<usize>>) -> Result<Place, UserErr> {
         let sig = match self.global_funcs.get(&name) {
             Some(sig) => sig,
-            None => { return Err(format!("No global function {}", name)); }
+            None => return u_err_opt!(range, "No global function {}", name),
         };
         let ret_tt = sig.name.tt.clone();
         if ret_tt.is_struct() || ret_tt.is_array() {
-            return Err(format!("Returning arrays and structs from functions not yet supported"));
+            return u_err_opt!(range, "Returning arrays and structs from functions not yet supported");
         }
         Ok(Place::DTemp(0, ret_tt))
     }

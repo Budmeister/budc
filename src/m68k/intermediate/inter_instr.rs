@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use crate::{m68k::*, bud::BudBinop};
+use crate::{m68k::*, bud::BudBinop, error::CompilerErr};
 
 use super::place::*;
 
@@ -75,7 +75,7 @@ impl std::fmt::Display for DataSize {
 
 pub type Imm = i32;
 
-pub fn imm_to_dreg(imm: Imm, instrs: &mut Vec<ValidInstruction>, n: Proxy) -> Result<DReg, String> {
+pub fn imm_to_dreg(imm: Imm, instrs: &mut Vec<ValidInstruction>, n: Proxy) -> Result<DReg, CompilerErr> {
     let dreg: DReg = n.into();
     let addr_mode: AddrMode = dreg.into();
     let size = DataSize::LWord;

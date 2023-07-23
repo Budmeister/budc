@@ -7,6 +7,7 @@
 extern crate proc_macros;
 
 pub mod bud;
+pub mod error;
 pub mod m68k;
 pub mod grammar;
 pub mod slp;
@@ -19,6 +20,7 @@ pub mod logging;
 use logging::SimpleLogger;
 use log::{error, debug};
 
+use crate::error::{display_err, get_lines};
 use crate::grammar::*;
 use crate::logging::LoggingOptions;
 
@@ -302,8 +304,12 @@ fn main() {
         Ok(code) => {
 
         }
-        Err(msg) => {
-            error!("{}", msg.yellow());
+        Err(errors) => {
+            error!("{}", format!("Unable to compile due to {} errors", errors.len()));
+            for (err, func) in errors {
+                let lines = get_lines(&contents);
+                display_err(err, func.as_deref(), &lines);
+            }
             return;
         }
     }
