@@ -289,7 +289,7 @@ fn main() {
             if log_options.print_syntax_tree {
                 debug!("{}", "Syntax Tree:".color("#ff7f00").bold());
                 print_tree_visitor(&node_stack[0], 0);
-                println!("");
+                println!();
                 debug!("End syntax tree");
             }
             tree = node_stack.into_iter().next().unwrap();

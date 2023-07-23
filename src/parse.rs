@@ -71,10 +71,13 @@ where
             }
             // Remove len items from the stack
             let mut children = vec![];
+            let mut slice_location = slice_location;
             for _ in 0..*len {
                 state_stack.pop();
                 let node_opt = node_stack.pop();
                 if let Some(node) = node_opt {
+                    slice_location.start = usize::min(slice_location.start, node.get_range().start);
+                    slice_location.end = usize::max(slice_location.end, node.get_range().end);
                     children.push(node);
                 } else {
                     return Err(
@@ -156,7 +159,7 @@ where
             } else {
                 return Err(format!("Did not find a valid action in Multi-action: {:?}", actions));
             }
-            return do_action(
+            do_action(
                 log_options,
                 tok,
                 slice,
@@ -167,7 +170,7 @@ where
                 state_num,
                 states,
                 load_data,
-            );
+            )
         }
         None => {
             let options = &states[*state_stack.last().unwrap()].next.keys();
@@ -217,11 +220,11 @@ where
                     tok,
                     lex.slice(),
                     lex.span(),
-                    &action_opt,
+                    action_opt,
                     &mut state_stack,
                     &mut node_stack,
                     state_num,
-                    &states,
+                    states,
                     load_data,
                 )? {
                     tok = t;
@@ -250,11 +253,11 @@ where
                 tok,
                 "$",
                 0..0,
-                &action_opt,
+                action_opt,
                 &mut state_stack,
                 &mut node_stack,
                 state_num,
-                &states,
+                states,
                 load_data,
             )? {
                 tok = t;
@@ -299,13 +302,13 @@ fn get_indent(indent: i32) -> String {
 
 pub fn print_tree_visitor<T: Display, N: Display>(node: &Node<T, N>, indent: i32) {
     match node {
-        Node::Tm{ t, range: _ } => {
-            print!("\"{}\"", t);
+        Node::Tm{ t, range } => {
+            print!("\"{}\": {:?}", t, range);
         },
-        Node::NonTm{ n, children, range: _ } => {
+        Node::NonTm{ n, children, range } => {
             let indent_str = get_indent(indent);
             let plus_1 = get_indent(indent + DEFAULT_INDENT);
-            println!("\"{}\" {{", n);
+            println!("\"{}\": {:?} {{", n, range);
             for child in children {
                 print!("{}", plus_1);
                 print_tree_visitor(child, indent + DEFAULT_INDENT);

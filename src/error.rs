@@ -1,8 +1,14 @@
+//! Error handling and printing
+//! 
+//! Author:     Brian Smith
+//! Year:       2023
+
 use std::ops::Range;
 
 use colored::Colorize;
 use log::*;
 
+use crate::tools::LinesWithEndings;
 
 
 pub enum BudErr {
@@ -48,7 +54,7 @@ pub struct UserErr {
 }
 
 pub fn get_lines(source: &str) -> Vec<&str> {
-    source.lines().collect()
+    Into::<LinesWithEndings>::into(source).collect()
 }
 
 pub fn display_err(err: BudErr, func: Option<&str>, lines: &[&str]) {
