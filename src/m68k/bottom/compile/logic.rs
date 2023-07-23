@@ -14,7 +14,7 @@ pub fn compile_tst_iinstr(from: Place, range: Range<usize>, instrs: &mut Vec<Val
     if from.is_array() || from.is_struct() || from.is_void() {
         return c_err!("Cannot get condition codes from value of type {}", from.get_type());
     }
-    let size = from.get_data_size(env).unwrap();
+    let size = from.get_data_size(env, Some(&range))?.unwrap();
     let from = if fenv.place_is_areg(&from) {
         fenv.place_to_dreg(from, range, instrs, env, Proxy1)?.0.into()
     } else {

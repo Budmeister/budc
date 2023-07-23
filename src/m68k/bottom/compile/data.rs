@@ -174,7 +174,7 @@ pub fn compile_movi_iinstr(
             to.get_type()
         );
     }
-    let size = to.get_data_size(env).unwrap();
+    let size = to.get_data_size(env, Some(&range))?.unwrap();
     let to = fenv.place_to_addr_mode(to, range, instrs, Proxy1)?;
     let instr = Move(size, imm.into(), to).validate()?;
     instrs.push(instr);

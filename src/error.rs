@@ -89,7 +89,10 @@ pub fn display_err(err: BudErr, func: Option<&str>, lines: &[&str]) {
     }
     match err {
         BudErr::CompilerErr(err) => {
-            println!("{}", format!("    Compiler Error: {}", err.msg).red());
+            match err.location {
+                Some(range) => println!("{}", format!("    Compiler Error: {} @ {:?}", err.msg, range).red()),
+                None => println!("{}", format!("    CompilerError: {}", err.msg).red()),
+            }
         }
         BudErr::UserErr(err) => {
             println!("{}", format!("    User Error: {}", err.msg).red().bold());

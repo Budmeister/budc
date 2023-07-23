@@ -67,23 +67,12 @@ impl Place {
             }
         }
     }
-    pub fn get_size(&self, env: &Environment) -> u32 {
-        match env.types.get(&self.get_type()).unwrap().size {
-            Either::This(size) | Either::That((size, _)) => size
-        }
+    pub fn get_size(&self, env: &Environment, range: Option<&Range<usize>>) -> Result<u32, CompilerErr> {
+        self.get_type().get_size(env, range)
     }
     // Returns None if the size is not a Byte, Word, or LWord
-    pub fn get_data_size(&self, env: &Environment) -> Option<DataSize> {
-        if self.is_array() || self.is_struct() {
-            return None;
-        }
-        let size = self.get_size(env);
-        match size {
-            1 => Some(DataSize::Byte),
-            2 => Some(DataSize::Word),
-            4 => Some(DataSize::LWord),
-            _ => None,
-        }
+    pub fn get_data_size(&self, env: &Environment, range: Option<&Range<usize>>) -> Result<Option<DataSize>, CompilerErr> {
+        self.get_type().get_data_size(env, range)
     }
     /// Moves the value in the given DTemp to a new ATemp. This function frees the DTemp, and you must free the ATemp.
     fn d_to_a(d: DTemp, tt: TypeType, range: Range<usize>, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<ATemp, CompilerErr> {

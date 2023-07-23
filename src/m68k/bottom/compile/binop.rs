@@ -20,8 +20,8 @@ pub fn compile_binop_iinstr(src: Place, b: BudBinop, dest: Place, range: Range<u
             dest.get_type()
         );
     }
-    let size_src = src.get_data_size(env).unwrap();
-    let size_dest = dest.get_data_size(env).unwrap();
+    let size_src = src.get_data_size(env, Some(&range))?.unwrap();
+    let size_dest = dest.get_data_size(env, Some(&range))?.unwrap();
     match b {
         BudBinop::Plus => compile_plus(src, dest, size_src, size_dest, range, instrs, fenv, env),
         BudBinop::Minus => compile_minus(src, dest, size_src, size_dest, range, instrs, fenv, env),
