@@ -30,7 +30,7 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
                     // As a future optimization, we do not need to get a new place if
                     // both binops are the same and if the binop is associative
                     let tt = place.get_type();
-                    let dtemp = fienv.get_data_temp(tt.clone(), Some(nbe.get_range()))?;
+                    let dtemp = fienv.get_data_temp(tt.clone(), Some(nbe.get_range_owned()))?;
                     let d_place = Place::DTemp(dtemp, tt);
                     let plan = ReturnPlan::Move(d_place.clone());
                     compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
@@ -49,7 +49,7 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
                     if !preference.is_magic(env) {
                         return u_err!(nbe.get_range(), "Cannot read type {} as a condition, because it is not magic", preference);
                     }
-                    let dtemp = fienv.get_data_temp(preference.clone(), Some(nbe.get_range()))?;
+                    let dtemp = fienv.get_data_temp(preference.clone(), Some(nbe.get_range_owned()))?;
                     let d_place = Place::DTemp(dtemp, preference);
                     let plan = ReturnPlan::Move(d_place.clone());
                     compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
@@ -62,7 +62,7 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
                     return u_err!(range, "Cannot return array or struct type `{}` from binary expression {}", fienv.return_type(), b);
                 }
                 (ReturnPlan::Push(tt), _, _) => {
-                    let dtemp = fienv.get_data_temp(tt.clone(), Some(nbe.get_range()))?;
+                    let dtemp = fienv.get_data_temp(tt.clone(), Some(nbe.get_range_owned()))?;
                     let d_place = Place::DTemp(dtemp, tt);
                     let plan = ReturnPlan::Move(d_place.clone());
                     compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
@@ -465,7 +465,7 @@ pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs
         (_, un) => {
             // Store the result of `nbe` into a dtemp, do the unop, and then move the dtemp as the plan dictates
             let tt = tt.unwrap();   // if plan is not None, then tt is not None
-            let dtemp = fienv.get_data_temp(tt.clone(), Some(nbe.get_range()))?;
+            let dtemp = fienv.get_data_temp(tt.clone(), Some(nbe.get_range_owned()))?;
             let d_place = Place::DTemp(dtemp, tt);
             let instr = match un {
                 BudUnop::Neg => InterInstr::Neg(d_place.clone()),
@@ -611,7 +611,7 @@ pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut V
             if fienv.return_type().is_void() {
                 ret_place = None;
             } else {
-                let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range()))?;
+                let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range_owned()))?;
                 ret_place = Some(Place::DTemp(dtemp, tt));
             }
         }
@@ -619,19 +619,19 @@ pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut V
             if tt.is_array() || tt.is_struct() {
                 return u_err!(expr.get_range(), "Cannot get condition codes from array or struct");
             }
-            let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range()))?;
+            let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range_owned()))?;
             ret_place = Some(Place::DTemp(dtemp, tt));
         }
         ReturnPlan::Binop(b, _) => {
             if tt.is_array() || tt.is_struct() {
                 return u_err!(expr.get_range(), "Cannot do binop {} on array or struct", b);
             }
-            let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range()))?;
+            let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range_owned()))?;
             ret_place = Some(Place::DTemp(dtemp, tt));
         }
         ReturnPlan::Move(to) => ret_place = Some(to.clone()),
         ReturnPlan::Push(push_tt) => {
-            let dtemp = fienv.get_data_temp(push_tt.clone(), Some(expr.get_range()))?;
+            let dtemp = fienv.get_data_temp(push_tt.clone(), Some(expr.get_range_owned()))?;
             ret_place = Some(Place::DTemp(dtemp, push_tt.clone()));
         }
     }
@@ -778,7 +778,7 @@ pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, fienv: &mut 
                             }
                             None => {
                                 let tt = TypeType::Id("i32".to_owned());
-                                let off_temp = fienv.get_data_temp(tt.clone(), Some(range))?;   // offset as an index (not multiplied by sizeof(T))
+                                let off_temp = fienv.get_data_temp(tt.clone(), Some(range.clone()))?;   // offset as an index (not multiplied by sizeof(T))
                                 let off_place = Place::DTemp(off_temp, tt);
                                 let plan = ReturnPlan::Move(off_place);
                                 compile_expr(*offset, plan, instrs, fienv, env)?;
@@ -847,7 +847,7 @@ pub fn place_from_id_expr(id: IdExpr, instrs: &mut Vec<InterInstr>, fienv: &mut 
                             }
                             None => {
                                 let tt = TypeType::Id("i32".to_owned());
-                                let off_temp = fienv.get_data_temp(tt.clone(), Some(range))?;   // offset as an index (not multiplied by sizeof(T))
+                                let off_temp = fienv.get_data_temp(tt.clone(), Some(range.clone()))?;   // offset as an index (not multiplied by sizeof(T))
                                 let off_place = Place::DTemp(off_temp, tt);
                                 let plan = ReturnPlan::Move(off_place);
                                 compile_expr(offset, plan, instrs, fienv, env)?;

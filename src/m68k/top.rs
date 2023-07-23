@@ -28,6 +28,14 @@ impl BudExpander {
     pub fn get_built_in_types() -> HashMap<TypeType, Type> {
         [
             (
+                TypeType::Id("void".to_owned()),
+                Type {
+                    size: Either::This(0),
+                    typtyp: TypeType::Id("void".to_owned()),
+                    magic: false,
+                }
+            ),
+            (
                 TypeType::Id("i8".to_owned()),
                 Type {
                     size: Either::This(1),
@@ -85,7 +93,7 @@ impl BudExpander {
     ) -> Result<(), UserErr> {
         match be {
             BinExpr::Binary(nbe, _, be, _) => {
-                Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in);
+                Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in)?;
                 Self::get_types_in_binexpr(be, types, struct_names, built_in)
             }
             BinExpr::NonBin(nbe, _) => {

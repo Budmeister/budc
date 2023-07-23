@@ -18,10 +18,10 @@ pub enum Node<T, N> {
     NonTm{ n: N, children: Vec<Node<T, N>>, range: Range<usize> },
 }
 impl<T, N> Ranged for Node<T, N> {
-    fn get_range(&self) -> Range<usize> {
+    fn get_range(&self) -> &Range<usize> {
         match self {
-            Self::Tm { t: _, range } => *range,
-            Self::NonTm { n: _, children: _, range } => *range,
+            Self::Tm { t: _, range } => range,
+            Self::NonTm { n: _, children: _, range } => range,
         }
     }
 }

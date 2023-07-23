@@ -541,10 +541,10 @@ impl Item {
                     children: expr,
                     range: _,
                 }] => Ok(Item::FuncDecl(
-                    VarDecl::new(name, *range)?,
-                    VarDecl::news(args, *range)?,
-                    Box::new(Expr::new(expr, *range)?),
-                    *range,
+                    VarDecl::new(name, range.to_owned())?,
+                    VarDecl::news(args, range.to_owned())?,
+                    Box::new(Expr::new(expr, range.to_owned())?),
+                    range.to_owned(),
                 )),
                 _ => {
                     return c_err!(range, "Invalid node for {} {:?}", N::FuncDecl, children);
@@ -573,8 +573,8 @@ impl Item {
                     range: _,
                 }] => Ok(Item::StructDecl(
                     id.to_owned(),
-                    VarDecl::news(fields, *range)?,
-                    *range,
+                    VarDecl::news(fields, range.to_owned())?,
+                    range.to_owned(),
                 )),
                 _ => {
                     return c_err!(range, "Invalid node for {} {:?}", N::StructDecl, children);
@@ -618,7 +618,7 @@ impl Item {
                     children: is_children,
                     range: _,
                 }] => {
-                    items.push(Item::new(i_children, *range)?);
+                    items.push(Item::new(i_children, range.to_owned())?);
                     children = is_children.clone();
                 }
                 [Node::NonTm {
@@ -626,7 +626,7 @@ impl Item {
                     children,
                     range,
                 }] => {
-                    items.push(Item::new(children, *range)?);
+                    items.push(Item::new(children, range.to_owned())?);
                     break;
                 }
                 _ => {
@@ -667,9 +667,9 @@ impl VarDecl {
                 t: T::Id(id),
                 range,
             }] => Ok(VarDecl {
-                typ: TypeExpr::new(typ, *range)?,
+                typ: TypeExpr::new(typ, range.to_owned())?,
                 id: id.to_owned(),
-                range: *range,
+                range: range.to_owned(),
             }),
             _ => {
                 c_err!("Invalid node for {} {:?}", N::VarDecl, children)
@@ -694,7 +694,7 @@ impl VarDecl {
                     children: vs_children,
                     range: _,
                 }] => {
-                    items.push(VarDecl::new(v_children, *range)?);
+                    items.push(VarDecl::new(v_children, range.to_owned())?);
                     children = vs_children.clone();
                 }
                 [Node::NonTm {
@@ -702,7 +702,7 @@ impl VarDecl {
                     children,
                     range,
                 }] => {
-                    items.push(VarDecl::new(children, *range)?);
+                    items.push(VarDecl::new(children, range.to_owned())?);
                     break;
                 }
                 [Node::Tm {
@@ -725,7 +725,7 @@ impl VarDecl {
                     t: T::RightRound,
                     range: _,
                 }] => {
-                    return VarDecl::news(children, *range);
+                    return VarDecl::news(children, range.to_owned());
                 }
                 _ => {
                     return c_err!(range, "Invalid node for {} {:?}", N::VarDecls, children);
@@ -752,9 +752,9 @@ impl Expr {
                 children,
                 range,
             }] => Ok(Expr {
-                bin_expr: Box::new(BinExpr::new(children, *range)?),
+                bin_expr: Box::new(BinExpr::new(children, range.to_owned())?),
                 with_semicolon: false,
-                range: *range,
+                range: range.to_owned(),
             }),
             [Node::NonTm {
                 n: N::Expr,
@@ -764,7 +764,7 @@ impl Expr {
                 t: T::Semicolon,
                 range: _,
             }] => {
-                let mut expr = Expr::new(children, *range)?;
+                let mut expr = Expr::new(children, range.to_owned())?;
                 expr.with_semicolon = true;
                 Ok(expr)
             }
@@ -791,7 +791,7 @@ impl Expr {
                     children: es_children,
                     range: _,
                 }] => {
-                    items.push(Expr::new(e_children, *range)?);
+                    items.push(Expr::new(e_children, range.to_owned())?);
                     children = es_children.clone();
                 }
                 [Node::NonTm {
@@ -803,7 +803,7 @@ impl Expr {
                     children: expr2,
                     range: _,
                 }] => {
-                    items.push(Expr::new(expr, *range)?);
+                    items.push(Expr::new(expr, range.to_owned())?);
                     children = expr2.clone();
                 }
                 [Node::NonTm {
@@ -811,7 +811,7 @@ impl Expr {
                     children: expr,
                     range,
                 }] => {
-                    items.push(Expr::new(expr, *range)?);
+                    items.push(Expr::new(expr, range.to_owned())?);
                     break;
                 }
                 [Node::Tm {
@@ -825,7 +825,7 @@ impl Expr {
                     t: T::RightSquiggly,
                     range: _,
                 }] => {
-                    return Expr::news(children, *range);
+                    return Expr::news(children, range.to_owned());
                 }
                 _ => {
                     return c_err!(range, "Invalid node for {} {:?}", N::Exprs, children);
@@ -841,8 +841,8 @@ impl Into<Result<i32, BudErr>> for Expr {
     }
 }
 impl Ranged for Expr {
-    fn get_range(&self) -> Range<usize> {
-        self.range
+    fn get_range(&self) -> &Range<usize> {
+        &self.range
     }
 }
 
@@ -880,9 +880,9 @@ impl BinExpr {
                     }
                 }
                 Ok(BinExpr::Binary(
-                    Box::new(NonBinExpr::new(nbe, *range1)?),
+                    Box::new(NonBinExpr::new(nbe, range1.to_owned())?),
                     BudBinop::new(b)?,
-                    Box::new(BinExpr::new(be, *range1)?),
+                    Box::new(BinExpr::new(be, range1.to_owned())?),
                     range,
                 ))
             }
@@ -891,7 +891,7 @@ impl BinExpr {
                 children: nbe,
                 range: range1,
             }] => Ok(BinExpr::NonBin(
-                Box::new(NonBinExpr::new(nbe, *range1)?),
+                Box::new(NonBinExpr::new(nbe, range1.to_owned())?),
                 range,
             )),
             _ => {
@@ -911,10 +911,10 @@ impl Into<Result<i32, BudErr>> for BinExpr {
     }
 }
 impl Ranged for BinExpr {
-    fn get_range(&self) -> Range<usize> {
+    fn get_range(&self) -> &Range<usize> {
         match self {
-            Self::NonBin(_, range) => *range,
-            Self::Binary(_, _, _, range) => *range,
+            Self::NonBin(_, range) => range,
+            Self::Binary(_, _, _, range) => range,
         }
     }
 }
@@ -947,87 +947,87 @@ impl NonBinExpr {
                 n: N::BlockExpr,
                 children,
                 range,
-            }] => Self::block_expr(children, *range),
+            }] => Self::block_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::AssignExpr,
                 children,
                 range,
-            }] => Self::assign_expr(children, *range),
+            }] => Self::assign_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::VarDeclAssgn,
                 children,
                 range,
-            }] => Self::var_decl_assign(children, *range),
+            }] => Self::var_decl_assign(children, range.to_owned()),
             [Node::NonTm {
                 n: N::ReturnExpr,
                 children,
                 range,
-            }] => Self::return_expr(children, *range),
+            }] => Self::return_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::CleanupCall,
                 children,
                 range,
-            }] => Self::cleanup_call(children, *range),
+            }] => Self::cleanup_call(children, range.to_owned()),
             [Node::NonTm {
                 n: N::CleanupExpr,
                 children,
                 range,
-            }] => Self::cleanup_expr(children, *range),
+            }] => Self::cleanup_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::IdExpr,
                 children,
                 range,
-            }] => Self::id_expr(children, *range),
+            }] => Self::id_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::LitExpr,
                 children,
                 range,
-            }] => Self::lit_expr(children, *range),
+            }] => Self::lit_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::ParenExpr,
                 children,
                 range,
-            }] => Self::paren_expr(children, *range),
+            }] => Self::paren_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::UnaryExpr,
                 children,
                 range,
-            }] => Self::unary_expr(children, *range),
+            }] => Self::unary_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::IfExpr,
                 children,
                 range,
-            }] => Self::if_expr(children, *range),
+            }] => Self::if_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::IfElse,
                 children,
                 range,
-            }] => Self::if_else(children, *range),
+            }] => Self::if_else(children, range.to_owned()),
             [Node::NonTm {
                 n: N::UnlExpr,
                 children,
                 range,
-            }] => Self::unless_expr(children, *range),
+            }] => Self::unless_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::UnlElse,
                 children,
                 range,
-            }] => Self::unless_else(children, *range),
+            }] => Self::unless_else(children, range.to_owned()),
             [Node::NonTm {
                 n: N::WhileExpr,
                 children,
                 range,
-            }] => Self::while_expr(children, *range),
+            }] => Self::while_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::DoWhile,
                 children,
                 range,
-            }] => Self::do_while(children, *range),
-            [Node::Tm { t: T::Break, range }] => Ok(NonBinExpr::Break(*range)),
+            }] => Self::do_while(children, range.to_owned()),
+            [Node::Tm { t: T::Break, range }] => Ok(NonBinExpr::Break(range.to_owned())),
             [Node::Tm {
                 t: T::Continue,
                 range,
-            }] => Ok(NonBinExpr::Continue(*range)),
+            }] => Ok(NonBinExpr::Continue(range.to_owned())),
             _ => {
                 c_err!(range, "Invalid node for {} {:?}", N::NonBinExpr, children)
             }
@@ -1037,7 +1037,7 @@ impl NonBinExpr {
         children: &Vec<Node<BudTerminal, BudNonTerminal>>,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
-        Ok(NonBinExpr::BlockExpr(Expr::news(children, range)?, range))
+        Ok(NonBinExpr::BlockExpr(Expr::news(children, range.to_owned())?, range))
     }
     fn assign_expr(
         children: &Vec<Node<BudTerminal, BudNonTerminal>>,
@@ -1059,8 +1059,8 @@ impl NonBinExpr {
                 t: T::Semicolon,
                 range: _,
             }] => Ok(NonBinExpr::AssignExpr(
-                Box::new(IdExpr::new(id_expr, *range1)?),
-                Box::new(Expr::new(expr, *range2)?),
+                Box::new(IdExpr::new(id_expr, range1.to_owned())?),
+                Box::new(Expr::new(expr, range2.to_owned())?),
                 range,
             )),
             _ => {
@@ -1088,8 +1088,8 @@ impl NonBinExpr {
                 t: T::Semicolon,
                 range: _,
             }] => Ok(NonBinExpr::VarDeclAssgn(
-                Box::new(VarDecl::new(var, *range1)?),
-                Box::new(Expr::new(expr, *range2)?),
+                Box::new(VarDecl::new(var, range1.to_owned())?),
+                Box::new(Expr::new(expr, range2.to_owned())?),
                 range,
             )),
             _ => {
@@ -1120,7 +1120,7 @@ impl NonBinExpr {
                 t: T::Semicolon,
                 range: _,
             }] => Ok(NonBinExpr::ReturnExpr(
-                Some(Box::new(Expr::new(expr, *range1)?)),
+                Some(Box::new(Expr::new(expr, range1.to_owned())?)),
                 range,
             )),
             _ => {
@@ -1139,7 +1139,7 @@ impl NonBinExpr {
             }, Node::Tm {
                 t: T::Semicolon,
                 range,
-            }] => Ok(NonBinExpr::CleanupCall(*range)),
+            }] => Ok(NonBinExpr::CleanupCall(range.to_owned())),
             _ => {
                 return c_err!(range, "Invalid node for {} {:?}", N::CleanupCall, children);
             }
@@ -1161,7 +1161,7 @@ impl NonBinExpr {
                 t: T::Semicolon,
                 range: _,
             }] => Ok(NonBinExpr::CleanupExpr(
-                Box::new(Expr::new(expr, *range1)?),
+                Box::new(Expr::new(expr, range1.to_owned())?),
                 range,
             )),
             _ => {
@@ -1174,7 +1174,7 @@ impl NonBinExpr {
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         Ok(NonBinExpr::IdExpr(
-            Box::new(IdExpr::new(children, range)?),
+            Box::new(IdExpr::new(children, range.to_owned())?),
             range,
         ))
     }
@@ -1200,7 +1200,7 @@ impl NonBinExpr {
                 t: T::RightRound,
                 range: _,
             }] => Ok(NonBinExpr::ParenExpr(
-                Box::new(Expr::new(expr, *range1)?),
+                Box::new(Expr::new(expr, range1.to_owned())?),
                 range,
             )),
             _ => {
@@ -1233,7 +1233,7 @@ impl NonBinExpr {
                 }
                 Ok(NonBinExpr::UnaryExpr(
                     BudUnop::new(u)?,
-                    Box::new(NonBinExpr::new(nbe, *range1)?),
+                    Box::new(NonBinExpr::new(nbe, range1.to_owned())?),
                     range,
                 ))
             }
@@ -1258,14 +1258,14 @@ impl NonBinExpr {
             }] => {
                 let expr = Expr {
                     bin_expr: Box::new(BinExpr::NonBin(
-                        Box::new(Self::BlockExpr(Expr::news(exprs, *range2)?, *range2)),
-                        *range2,
+                        Box::new(Self::BlockExpr(Expr::news(exprs, range2.to_owned())?, range2.to_owned())),
+                        range2.to_owned(),
                     )),
                     with_semicolon: false,
-                    range: *range2,
+                    range: range2.to_owned(),
                 };
                 Ok(NonBinExpr::IfExpr(
-                    Box::new(Expr::new(cond, *range1)?),
+                    Box::new(Expr::new(cond, range1.to_owned())?),
                     Box::new(expr),
                     range,
                 ))
@@ -1293,21 +1293,21 @@ impl NonBinExpr {
                 let expr_t = Expr {
                     bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(
                         exprs_t,
-                        *range2,
-                    )?, *range2)), *range2)),
+                        range2.to_owned(),
+                    )?, range2.to_owned())), range2.to_owned())),
                     with_semicolon: false,
-                    range: *range2,
+                    range: range2.to_owned(),
                 };
                 let expr_f = Expr {
                     bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(
                         exprs_f,
-                        *range3,
-                    )?, *range3)), *range3)),
+                        range3.to_owned(),
+                    )?, range3.to_owned())), range3.to_owned())),
                     with_semicolon: false,
-                    range: *range3,
+                    range: range3.to_owned(),
                 };
                 Ok(NonBinExpr::IfElse(
-                    Box::new(Expr::new(cond, *range1)?),
+                    Box::new(Expr::new(cond, range1.to_owned())?),
                     Box::new(expr_t),
                     Box::new(expr_f),
                     range,
@@ -1337,14 +1337,14 @@ impl NonBinExpr {
             }] => {
                 let expr = Expr {
                     bin_expr: Box::new(BinExpr::NonBin(
-                        Box::new(Self::BlockExpr(Expr::news(exprs, *range2)?, *range2)),
-                        *range2,
+                        Box::new(Self::BlockExpr(Expr::news(exprs, range2.to_owned())?, range2.to_owned())),
+                        range2.to_owned(),
                     )),
                     with_semicolon: false,
-                    range: *range2,
+                    range: range2.to_owned(),
                 };
                 Ok(NonBinExpr::UnlExpr(
-                    Box::new(Expr::new(cond, *range1)?),
+                    Box::new(Expr::new(cond, range1.to_owned())?),
                     Box::new(expr),
                     range
                 ))
@@ -1378,21 +1378,21 @@ impl NonBinExpr {
                 let expr_f = Expr {
                     bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(
                         exprs_f,
-                        *range2,
-                    )?, *range2)), *range2)),
+                        range2.to_owned(),
+                    )?, range2.to_owned())), range2.to_owned())),
                     with_semicolon: false,
-                    range: *range2,
+                    range: range2.to_owned(),
                 };
                 let expr_t = Expr {
                     bin_expr: Box::new(BinExpr::NonBin(Box::new(Self::BlockExpr(Expr::news(
                         exprs_t,
-                        *range3,
-                    )?, *range3)), *range3)),
+                        range3.to_owned(),
+                    )?, range3.to_owned())), range3.to_owned())),
                     with_semicolon: false,
-                    range: *range3,
+                    range: range3.to_owned(),
                 };
                 Ok(NonBinExpr::UnlElse(
-                    Box::new(Expr::new(cond, *range1)?),
+                    Box::new(Expr::new(cond, range1.to_owned())?),
                     Box::new(expr_f),
                     Box::new(expr_t),
                     range,
@@ -1416,14 +1416,14 @@ impl NonBinExpr {
             }] => {
                 let expr = Expr {
                     bin_expr: Box::new(BinExpr::NonBin(
-                        Box::new(Self::BlockExpr(Expr::news(exprs, *range2)?, *range2)),
-                        *range2,
+                        Box::new(Self::BlockExpr(Expr::news(exprs, range2.to_owned())?, range2.to_owned())),
+                        range2.to_owned(),
                     )),
                     with_semicolon: false,
-                    range: *range2,
+                    range: range2.to_owned(),
                 };
                 Ok(NonBinExpr::WhileExpr(
-                    Box::new(Expr::new(cond, *range1)?),
+                    Box::new(Expr::new(cond, range1.to_owned())?),
                     Box::new(expr),
                     range,
                 ))
@@ -1449,15 +1449,15 @@ impl NonBinExpr {
             }] => {
                 let expr = Expr {
                     bin_expr: Box::new(BinExpr::NonBin(
-                        Box::new(Self::BlockExpr(Expr::news(exprs, *range1)?, *range1)),
-                        *range1,
+                        Box::new(Self::BlockExpr(Expr::news(exprs, range1.to_owned())?, range1.to_owned())),
+                        range1.to_owned(),
                     )),
                     with_semicolon: false,
-                    range: *range1,
+                    range: range1.to_owned(),
                 };
                 Ok(NonBinExpr::DoWhile(
                     Box::new(expr),
-                    Box::new(Expr::new(cond, *range2)?),
+                    Box::new(Expr::new(cond, range2.to_owned())?),
                     range,
                 ))
             }
@@ -1493,26 +1493,26 @@ impl Into<Result<i32, BudErr>> for NonBinExpr {
     }
 }
 impl Ranged for NonBinExpr {
-    fn get_range(&self) -> Range<usize> {
+    fn get_range(&self) -> &Range<usize> {
         match self {
-            NonBinExpr::BlockExpr(_, range) => *range,
-            NonBinExpr::AssignExpr(_, _, range) => *range,
-            NonBinExpr::VarDeclAssgn(_, _, range) => *range,
-            NonBinExpr::ReturnExpr(_, range) => *range,
-            NonBinExpr::CleanupCall(range) => *range,
-            NonBinExpr::CleanupExpr(_, range) => *range,
-            NonBinExpr::IdExpr(_, range) => *range,
-            NonBinExpr::LitExpr(_, range) => *range,
-            NonBinExpr::ParenExpr(_, range) => *range,
-            NonBinExpr::UnaryExpr(_, _, range) => *range,
-            NonBinExpr::IfExpr(_, _, range) => *range,
-            NonBinExpr::IfElse(_, _, _, range) => *range,
-            NonBinExpr::UnlExpr(_, _, range) => *range,
-            NonBinExpr::UnlElse(_, _, _, range) => *range,
-            NonBinExpr::WhileExpr(_, _, range) => *range,
-            NonBinExpr::DoWhile(_, _, range) => *range,
-            NonBinExpr::Break(range) => *range,
-            NonBinExpr::Continue(range) => *range,
+            NonBinExpr::BlockExpr(_, range) => range,
+            NonBinExpr::AssignExpr(_, _, range) => range,
+            NonBinExpr::VarDeclAssgn(_, _, range) => range,
+            NonBinExpr::ReturnExpr(_, range) => range,
+            NonBinExpr::CleanupCall(range) => range,
+            NonBinExpr::CleanupExpr(_, range) => range,
+            NonBinExpr::IdExpr(_, range) => range,
+            NonBinExpr::LitExpr(_, range) => range,
+            NonBinExpr::ParenExpr(_, range) => range,
+            NonBinExpr::UnaryExpr(_, _, range) => range,
+            NonBinExpr::IfExpr(_, _, range) => range,
+            NonBinExpr::IfElse(_, _, _, range) => range,
+            NonBinExpr::UnlExpr(_, _, range) => range,
+            NonBinExpr::UnlElse(_, _, _, range) => range,
+            NonBinExpr::WhileExpr(_, _, range) => range,
+            NonBinExpr::DoWhile(_, _, range) => range,
+            NonBinExpr::Break(range) => range,
+            NonBinExpr::Continue(range) => range,
         }
     }
 }
@@ -1532,7 +1532,7 @@ impl IdExpr {
                 children: sqe,
                 range: range1,
             }] => {
-                let id_expr = Self::sqe_to_id_sqr(sqe, *range1)?;
+                let id_expr = Self::sqe_to_id_sqr(sqe, range1.to_owned())?;
                 Ok(id_expr)
             }
             [Node::Tm {
@@ -1549,8 +1549,8 @@ impl IdExpr {
                 t: T::RightRound,
                 range: _,
             }] => Ok(IdExpr::RoundIndex(
-                Box::new(Self::id_to_expr(id.to_owned(), *range1)),
-                Some(Expr::news(args, *range2)?),
+                Box::new(Self::id_to_expr(id.to_owned(), range1.to_owned())),
+                Some(Expr::news(args, range2.to_owned())?),
                 range,
             )),
             [Node::Tm {
@@ -1563,18 +1563,18 @@ impl IdExpr {
                 t: T::RightRound,
                 range: _,
             }] => {
-                let expr = Self::id_to_expr(id.to_owned(), *range1);
+                let expr = Self::id_to_expr(id.to_owned(), range1.to_owned());
                 Ok(IdExpr::RoundIndex(Box::new(expr), None, range))
             }
             [Node::Tm {
                 t: T::Id(id),
                 range: range1,
-            }] => Ok(IdExpr::Id(id.to_owned(), *range1)),
+            }] => Ok(IdExpr::Id(id.to_owned(), range1.to_owned())),
             [Node::Tm { t: T::Star, range: _ }, Node::NonTm {
                 n: N::IdExpr,
                 children: ide,
                 range: range1,
-            }] => Ok(IdExpr::Deref(Box::new(IdExpr::new(ide, *range1)?), range)),
+            }] => Ok(IdExpr::Deref(Box::new(IdExpr::new(ide, range1.to_owned())?), range)),
             _ => {
                 return c_err!(range, "Invalid node for {} {:?}", N::IdExpr, children);
             }
@@ -1584,13 +1584,13 @@ impl IdExpr {
         Self::id_expr_to_expr(IdExpr::Id(id, range))
     }
     fn id_expr_to_expr(id_expr: IdExpr) -> Expr {
-        let range = id_expr.get_range();
+        let range = id_expr.get_range_owned();
         Expr {
             bin_expr: Box::new(BinExpr::NonBin(Box::new(NonBinExpr::IdExpr(Box::new(
                 id_expr,
-            ), range)), range)),
+            ), range.to_owned())), range.to_owned())),
             with_semicolon: false,
-            range
+            range: range.to_owned()
         }
     }
     fn sqe_to_id_sqr(children: &BudNodes, range: Range<usize>) -> Result<IdExpr, BudErr> {
@@ -1603,8 +1603,8 @@ impl IdExpr {
                 children: sqr,
                 range: range2,
             }] => {
-                let mut id_expr = IdExpr::Id(id.to_owned(), *range1);
-                id_expr = Self::put_indices_on(id_expr, sqr, *range2)?;
+                let mut id_expr = IdExpr::Id(id.to_owned(), range1.to_owned());
+                id_expr = Self::put_indices_on(id_expr, sqr, range2.to_owned())?;
                 Ok(id_expr)
             }
             _ => {
@@ -1636,9 +1636,9 @@ impl IdExpr {
                 children: sqr2,
                 range: range2,
             }] => {
-                let expr = Expr::new(expr, *range1)?;
+                let expr = Expr::new(expr, range1.to_owned())?;
                 let mut id_expr = IdExpr::SquareIndex(Box::new(id_expr), Box::new(expr), range);
-                id_expr = Self::put_indices_on(id_expr, sqr2, *range2)?;
+                id_expr = Self::put_indices_on(id_expr, sqr2, range2.to_owned())?;
                 Ok(id_expr)
             }
             [Node::Tm {
@@ -1652,7 +1652,7 @@ impl IdExpr {
                 t: T::RightSquare,
                 range: _,
             }] => {
-                let expr = Expr::new(expr, *range1)?;
+                let expr = Expr::new(expr, range1.to_owned())?;
                 let id_expr = IdExpr::SquareIndex(Box::new(id_expr), Box::new(expr), range);
                 Ok(id_expr)
             }
@@ -1668,12 +1668,12 @@ impl IdExpr {
     }
 }
 impl Ranged for IdExpr {
-    fn get_range(&self) -> Range<usize> {
+    fn get_range(&self) -> &Range<usize> {
         match self {
-            IdExpr::SquareIndex(_, _, range) => *range,
-            IdExpr::RoundIndex(_, _, range) => *range,
-            IdExpr::Id(_, range) => *range,
-            IdExpr::Deref(_, range) => *range,
+            IdExpr::SquareIndex(_, _, range) => range,
+            IdExpr::RoundIndex(_, _, range) => range,
+            IdExpr::Id(_, range) => range,
+            IdExpr::Deref(_, range) => range,
         }
     }
 }
@@ -1690,12 +1690,12 @@ impl TypeExpr {
             [Node::Tm {
                 t: T::Id(id),
                 range: range1,
-            }] => Ok(TypeExpr::Id(id.to_owned(), *range1)),
+            }] => Ok(TypeExpr::Id(id.to_owned(), range1.to_owned())),
             [Node::NonTm {
                 n: N::SqrExpr,
                 children: sqe,
                 range: range1,
-            }] => Self::sqe_to_typ_sqr(sqe, *range1),
+            }] => Self::sqe_to_typ_sqr(sqe, range1.to_owned()),
             [Node::Tm {
                 t: T::Reference,
                 range: _,
@@ -1714,10 +1714,10 @@ impl TypeExpr {
                 children: sqr,
                 range: range2,
             }] => Ok(TypeExpr::TypSqr(
-                Box::new(TypeExpr::Pointer(Box::new(TypeExpr::new(te, *range1)?), range)),
+                Box::new(TypeExpr::Pointer(Box::new(TypeExpr::new(te, range1.to_owned())?), range.to_owned())),
                 {
                     let mut lengths = Vec::new();
-                    Self::sqr_to_lengths(sqr, &mut lengths, *range2)?;
+                    Self::sqr_to_lengths(sqr, &mut lengths, range2.to_owned())?;
                     lengths
                 },
                 range
@@ -1735,7 +1735,7 @@ impl TypeExpr {
             }, Node::Tm {
                 t: T::RightRound,
                 range: _,
-            }] => Ok(TypeExpr::Pointer(Box::new(TypeExpr::new(typ, *range1)?), range)),
+            }] => Ok(TypeExpr::Pointer(Box::new(TypeExpr::new(typ, range1.to_owned())?), range)),
             _ => {
                 return c_err!(range, "Invalid node for {} {:?}", N::TypeExpr, children);
             }
@@ -1751,9 +1751,9 @@ impl TypeExpr {
                 children: sqr,
                 range: range2,
             }] => {
-                let id = Box::new(TypeExpr::Id(id.to_owned(), *range1));
+                let id = Box::new(TypeExpr::Id(id.to_owned(), range1.to_owned()));
                 let mut lengths = Vec::new();
-                Self::sqr_to_lengths(sqr, &mut lengths, *range2)?;
+                Self::sqr_to_lengths(sqr, &mut lengths, range2.to_owned())?;
                 Ok(TypeExpr::TypSqr(id, lengths, range))
             }
             _ => {
@@ -1784,7 +1784,7 @@ impl TypeExpr {
                 children: sqr2,
                 range: range2,
             }] => {
-                let expr = Expr::new(expr, *range1)?;
+                let expr = Expr::new(expr, range1.to_owned())?;
                 let length = Into::<Result<i32, BudErr>>::into(expr)?;
                 lengths.push(length);
                 Self::sqr_to_lengths(sqr2, lengths, range)?;
@@ -1801,7 +1801,7 @@ impl TypeExpr {
                 t: T::RightSquare,
                 range: _,
             }] => {
-                let expr = Expr::new(expr, *range1)?;
+                let expr = Expr::new(expr, range1.to_owned())?;
                 let length: i32 = Into::<Result<i32, BudErr>>::into(expr)?;
                 lengths.push(length);
                 Ok(())
@@ -1818,11 +1818,11 @@ impl TypeExpr {
     }
 }
 impl Ranged for TypeExpr {
-    fn get_range(&self) -> Range<usize> {
+    fn get_range(&self) -> &Range<usize> {
         match self {
-            TypeExpr::Id(_, range) => *range,
-            TypeExpr::TypSqr(_, _, range) => *range,
-            TypeExpr::Pointer(_, range) => *range,
+            TypeExpr::Id(_, range) => range,
+            TypeExpr::TypSqr(_, _, range) => range,
+            TypeExpr::Pointer(_, range) => range,
         }
     }
 }

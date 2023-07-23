@@ -17,10 +17,10 @@ impl BudErr {
             Self::UserErr(user) => &user.msg,
         }
     }
-    pub fn get_location(&self) -> Option<Range<usize>> {
+    pub fn get_location(&self) -> Option<&Range<usize>> {
         match self {
-            Self::CompilerErr(comp) => comp.location,
-            Self::UserErr(user) => user.location,
+            Self::CompilerErr(comp) => comp.location.as_ref(),
+            Self::UserErr(user) => user.location.as_ref(),
         }
     }
 }
@@ -62,7 +62,7 @@ pub fn display_err(err: BudErr, func: Option<&str>, lines: &[&str]) {
     }
     println!();
     if let Some(range) = err.get_location() {
-        let (start, end, delta) = find_line_numbers(range, lines);
+        let (start, end, delta) = find_line_numbers(range.clone(), lines);
         let num_width = format!("{}", end).len();
         let mut i = range.start - delta;
         for line_num in start..end {
@@ -123,7 +123,16 @@ fn find_line_number0(location: usize, lines: &[&str]) -> (usize, usize) {
 }
 
 pub trait Ranged {
-    fn get_range(&self) -> Range<usize>;
+    fn get_range(&self) -> &Range<usize>;
+}
+pub trait RangedOwned {
+    fn get_range_owned(&self) -> Range<usize>;
+}
+impl<T> RangedOwned for T 
+where T: Ranged {
+    fn get_range_owned(&self) -> Range<usize> {
+        self.get_range().to_owned()
+    }
 }
 
 
