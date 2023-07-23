@@ -7,7 +7,7 @@ use log::*;
 
 use crate::{m68k::*, bud::*, error::*, u_err, c_err};
 
-use super::{return_plan::ReturnPlan, inter_instr::{InterInstr, Imm}, fienv::FunctionInterEnvironment, place::Place};
+use super::{return_plan::ReturnPlan, inter_instr::InterInstr, fienv::FunctionInterEnvironment, place::Place};
 
 
 pub fn compile_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
@@ -36,7 +36,7 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
                     compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
                     let plan = ReturnPlan::Binop(b, d_place.clone());
                     compile_bin_expr(*be, plan, instrs, fienv, env)?;
-                    ReturnPlan::Binop(pb, place).into_inter_instr(d_place, instrs, fienv, env)?;
+                    ReturnPlan::Binop(pb, place).into_inter_instr(d_place, range, instrs, fienv, env)?;
                 },
                 (ReturnPlan::Move(place), _, _) | (ReturnPlan::Return, false, place) => {
                     let plan = ReturnPlan::Move(place.clone());
@@ -68,7 +68,7 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
                     compile_non_bin_expr(*nbe, plan, instrs, fienv, env)?;
                     let plan = ReturnPlan::Binop(b, d_place.clone());
                     compile_bin_expr(*be, plan, instrs, fienv, env)?;
-                    let instr = InterInstr::Push(d_place);
+                    let instr = InterInstr::Push(d_place, range);
                     fienv.free_data_temp(dtemp);
                     instrs.push(instr);
                 },
@@ -91,7 +91,7 @@ pub fn compile_non_bin_expr(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<
         NonBinExpr::AssignExpr(id, expr, _)                                                => compile_assign_expr(*id, *expr, plan, instrs, fienv, env),
         NonBinExpr::VarDeclAssgn(vd, expr, _)                                              => compile_var_decl_assign(*vd, *expr, plan, instrs, fienv, env),
         NonBinExpr::ReturnExpr(expr, range)                                                => compile_return_expr(expr.map(|x| *x), range, plan, instrs, fienv, env),
-        NonBinExpr::CleanupCall(_)                                                     => compile_cleanup_call(plan, instrs, fienv, env),
+        NonBinExpr::CleanupCall(range)                                                     => compile_cleanup_call(range, plan, instrs, fienv, env),
         NonBinExpr::CleanupExpr(expr, _)                                               => compile_cleanup_expr(*expr, plan, instrs, fienv, env),
         NonBinExpr::IdExpr(id, _)                                                      => compile_id_expr(*id, plan, instrs, fienv, env),
         NonBinExpr::LitExpr(lit, range)                                                    => compile_lit_expr(lit, range, plan, instrs, fienv, env),
@@ -144,20 +144,22 @@ pub fn compile_block_expr(mut exprs: Vec<Expr>, range: Range<usize>, plan: Retur
     Ok(())
 }
 pub fn compile_assign_expr(id: IdExpr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let range = expr.get_range_owned();
     // Check that the variable exists
     let place = place_from_id_expr(id, instrs, fienv, env)?;
     let assign_plan = ReturnPlan::Move(place.clone());
     compile_expr(expr, assign_plan, instrs, fienv, env)?;
-    plan.into_inter_instr(place, instrs, fienv, env)?;
+    plan.into_inter_instr(place, range, instrs, fienv, env)?;
     Ok(())
 }
 pub fn compile_var_decl_assign(vd: VarDecl, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let range = expr.get_range_owned();
     let field = Field::new(vd, env);
     fienv.add_var(&field)?;
     let place = Place::Var(field);
     let assign_plan = ReturnPlan::Move(place.clone());
     compile_expr(expr, assign_plan, instrs, fienv, env)?;
-    plan.into_inter_instr(place, instrs, fienv, env)?;
+    plan.into_inter_instr(place, range, instrs, fienv, env)?;
     Ok(())
 }
 pub fn compile_return_expr(expr: Option<Expr>, range: Range<usize>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
@@ -173,9 +175,9 @@ pub fn compile_return_expr(expr: Option<Expr>, range: Range<usize>, _plan: Retur
         }
     }
 }
-pub fn compile_cleanup_call(_plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), BudErr> {
+pub fn compile_cleanup_call(range: Range<usize>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), BudErr> {
     let cleanup_label = fienv.get_cleanup_label();
-    let instr = InterInstr::Goto(cleanup_label);
+    let instr = InterInstr::Goto(cleanup_label, range);
     instrs.push(instr);
     Ok(())
 }
@@ -186,7 +188,7 @@ pub fn compile_cleanup_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<Inter
     match plan {
         ReturnPlan::Return => {
             let cleanup_label = fienv.get_cleanup_label();
-            let instr = InterInstr::Lbl(cleanup_label);
+            let instr = InterInstr::Lbl(cleanup_label, expr.get_range_owned());
             instrs.push(instr);
             fienv.cleanup_expr_created = true;
             compile_expr(expr, ReturnPlan::Return, instrs, fienv, env)?;
@@ -198,20 +200,21 @@ pub fn compile_cleanup_expr(expr: Expr, plan: ReturnPlan, instrs: &mut Vec<Inter
     }
 }
 pub fn compile_id_expr(id: IdExpr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let range = id.get_range_owned();
     let place = place_from_id_expr(id, instrs, fienv, env)?;
-    plan.into_inter_instr(place, instrs, fienv, env)?;
+    plan.into_inter_instr(place, range, instrs, fienv, env)?;
     Ok(())
 }
 pub fn compile_lit_expr(lit: Literal, range: Range<usize>, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
     match lit {
         Literal::Num(num) => {
-            plan.imm_into_inter_instr(num, instrs, fienv, env)?;
+            plan.imm_into_inter_instr(num, range, instrs, fienv, env)?;
         }
         Literal::Str(string) => {
             let str_ind = fienv.add_lit_string(string.clone());
             match plan {
                 ReturnPlan::Move(to) => {
-                    let instr = InterInstr::Movs(str_ind, to);
+                    let instr = InterInstr::Movs(str_ind, to, range);
                     instrs.push(instr);
                 }
                 ReturnPlan::Push(tt) => {
@@ -219,7 +222,7 @@ pub fn compile_lit_expr(lit: Literal, range: Range<usize>, plan: ReturnPlan, ins
                     if tt != str_tt {
                         return u_err!(range, "Expected to push value of type {} to stack but found string type {}", tt, str_tt);
                     }
-                    let instr = InterInstr::Puss(str_ind);
+                    let instr = InterInstr::Puss(str_ind, range);
                     instrs.push(instr);
                 }
                 ReturnPlan::Condition => {
@@ -228,7 +231,7 @@ pub fn compile_lit_expr(lit: Literal, range: Range<usize>, plan: ReturnPlan, ins
                 ReturnPlan::Binop(b, _) =>  {
                     return u_err!(range, "Cannot do binary operation {} on string literal \"{}\"", b, string);
                 }
-                ReturnPlan::Return => fienv.rets(str_ind, instrs, env, Some(range))?,
+                ReturnPlan::Return => fienv.rets(str_ind, instrs, env, range)?,
                 ReturnPlan::None => {}
             }
         }
@@ -253,14 +256,14 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                         panic!("Binop should be handled above in this function")
                     }
                     ReturnPlan::Move(to) => {
-                        let instr = InterInstr::MoVA(field.name, to);
+                        let instr = InterInstr::MoVA(field.name, to, range);
                         instrs.push(instr);
                         Ok(())
                     }
                     ReturnPlan::Condition => {
                         let atemp = fienv.get_addr_temp();
                         let a_place = Place::ATemp(atemp);
-                        let instr = InterInstr::MoVA(field.name, a_place.clone());
+                        let instr = InterInstr::MoVA(field.name, a_place.clone(), range);
                         instrs.push(instr);
                         a_place.free(fienv);
                         Ok(())
@@ -269,12 +272,12 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                         if tt != field.tt {
                             return u_err!(range, "Cannot convert {} to {}", field.tt, tt);
                         }
-                        let instr = InterInstr::PuVA(field.name);
+                        let instr = InterInstr::PuVA(field.name, range);
                         instrs.push(instr);
                         Ok(())
                     }
                     ReturnPlan::Return => {
-                        fienv.retva(&field.name, instrs, env, Some(range))?;
+                        fienv.retva(&field.name, instrs, env, range)?;
                         warn!("Returning reference to local variable `{}` from function", field.name);
                         Ok(())
                     }
@@ -299,7 +302,7 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                         match &to {
                             Place::ATemp(to_a) => {
                                 // Move from Ref to ATemp
-                                let instr = InterInstr::Lea(a, d, off, *to_a);
+                                let instr = InterInstr::Lea(a, d, off, *to_a, range);
                                 instrs.push(instr);
                                 fienv.free_addr_temp(a);
                                 if let Some(d) = d { fienv.free_data_temp(d); }
@@ -311,10 +314,10 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                                 // to an ATemp before we move to a DTemp
                                 if let TypeType::Pointer(to_val_tt) = to_tt {
                                     if tt == **to_val_tt {
-                                        let instr = InterInstr::Lea(a, d, off, a);
+                                        let instr = InterInstr::Lea(a, d, off, a, range.to_owned());
                                         instrs.push(instr);
                                         let a_place = Place::ATemp(a);
-                                        let instr = InterInstr::Move(a_place, to);
+                                        let instr = InterInstr::Move(a_place, to, range);
                                         instrs.push(instr);
                                         fienv.free_addr_temp(a);
                                         if let Some(d) = d { fienv.free_data_temp(d); }
@@ -333,10 +336,10 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                                 // Move from Ref to Var
                                 if let TypeType::Pointer(to_val_tt) = &field.tt {
                                     if tt == **to_val_tt {
-                                        let instr = InterInstr::Lea(a, d, off, a);
+                                        let instr = InterInstr::Lea(a, d, off, a, range.to_owned());
                                         instrs.push(instr);
                                         let a_place = Place::ATemp(a);
-                                        let instr = InterInstr::Move(a_place, to);
+                                        let instr = InterInstr::Move(a_place, to, range);
                                         instrs.push(instr);
                                         fienv.free_addr_temp(a);
                                         if let Some(d) = d { fienv.free_data_temp(d); }
@@ -357,10 +360,10 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                                 // but we are moving TO the thing pointed to by the plan's Ref.
                                 if let TypeType::Pointer(to_val_tt) = &to_tt {
                                     if tt == **to_val_tt {
-                                        let instr = InterInstr::Lea(a, d, off, a);
+                                        let instr = InterInstr::Lea(a, d, off, a, range.to_owned());
                                         instrs.push(instr);
                                         let a_place = Place::ATemp(a);
-                                        let instr = InterInstr::Move(a_place, to);
+                                        let instr = InterInstr::Move(a_place, to, range);
                                         instrs.push(instr);
                                         fienv.free_addr_temp(a);
                                         if let Some(d) = d { fienv.free_data_temp(d); }
@@ -380,7 +383,7 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                     ReturnPlan::Condition => {
                         // Move from Ref to ATemp
                         let atemp = fienv.get_addr_temp();
-                        let instr = InterInstr::Lea(a, d, off, atemp);
+                        let instr = InterInstr::Lea(a, d, off, atemp, range);
                         instrs.push(instr);
                         fienv.free_addr_temp(atemp);
                         fienv.free_addr_temp(a);
@@ -391,7 +394,7 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                     ReturnPlan::Push(to_tt) => {
                         if let TypeType::Pointer(to_val_tt) = &to_tt {
                             if tt == **to_val_tt {
-                                let instr = InterInstr::Pea(a, d, off);
+                                let instr = InterInstr::Pea(a, d, off, range);
                                 instrs.push(instr);
                                 fienv.free_addr_temp(a);
                                 if let Some(d) = d { fienv.free_data_temp(d); }
@@ -410,10 +413,10 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                         // Move from Ref to ATemp, then return
                         // Because we are moving an effective address, we have to move
                         // to an ATemp before we move to a DTemp
-                        let instr = InterInstr::Lea(a, d, off, a);
+                        let instr = InterInstr::Lea(a, d, off, a, range.to_owned());
                         instrs.push(instr);
                         let a_place = Place::ATemp(a);
-                        fienv.ret(a_place, instrs, env, Some(range))?;
+                        fienv.ret(a_place, instrs, env, range)?;
                         if let Some(d) = d { fienv.free_data_temp(d); }
                         Ok(())
                     }
@@ -434,9 +437,10 @@ pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs
     if let BudUnop::Ref = un {
         return get_reference(nbe, plan, instrs, fienv, env);
     }
+    let range = nbe.get_range_owned();
     if let Some(tt) = &tt {
         if !tt.is_magic(env) {
-            return u_err!(nbe.get_range(), "Cannot return non-magic type {} from unary operator {}", tt, un);
+            return u_err!(range, "Cannot return non-magic type {} from unary operator {}", tt, un);
         }
     }
     match (plan.clone(), un) {
@@ -450,9 +454,9 @@ pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs
             // Store result of `nbe` into `to`, and then do the unop on `to`
             compile_non_bin_expr(nbe, plan, instrs, fienv, env)?;
             let instr = match un {
-                BudUnop::Neg => InterInstr::Neg(to),
-                BudUnop::Not => InterInstr::Bnot(to),
-                BudUnop::Ref => panic!("Ref should be handled above in this function"),
+                BudUnop::Neg => InterInstr::Neg(to, range),
+                BudUnop::Not => InterInstr::Bnot(to, range),
+                BudUnop::Ref => return c_err!(range, "Ref should be handled above in this function"),
             };
             instrs.push(instr);
         }
@@ -461,19 +465,19 @@ pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs
             // Store the result of `nbe` into `to`, but do not do the unop
             compile_non_bin_expr(nbe, plan, instrs, fienv, env)?;
         }
-        (_, BudUnop::Ref) => panic!("Ref should be handled above in this function"),
+        (_, BudUnop::Ref) => return c_err!(range, "Ref should be handled above in this function"),
         (_, un) => {
             // Store the result of `nbe` into a dtemp, do the unop, and then move the dtemp as the plan dictates
             let tt = tt.unwrap();   // if plan is not None, then tt is not None
-            let dtemp = fienv.get_data_temp(tt.clone(), Some(nbe.get_range_owned()))?;
+            let dtemp = fienv.get_data_temp(tt.clone(), Some(range.to_owned()))?;
             let d_place = Place::DTemp(dtemp, tt);
             let instr = match un {
-                BudUnop::Neg => InterInstr::Neg(d_place.clone()),
-                BudUnop::Not => InterInstr::Bnot(d_place.clone()),
-                BudUnop::Ref => panic!("Ref should be handled above in this function"),
+                BudUnop::Neg => InterInstr::Neg(d_place.clone(), range.to_owned()),
+                BudUnop::Not => InterInstr::Bnot(d_place.clone(), range.to_owned()),
+                BudUnop::Ref => return c_err!(range, "Ref should be handled above in this function"),
             };
             instrs.push(instr);
-            plan.into_inter_instr(d_place, instrs, fienv, env)?;
+            plan.into_inter_instr(d_place, range, instrs, fienv, env)?;
             fienv.free_data_temp(dtemp);
         }
     }
@@ -486,6 +490,8 @@ fn eval_cond(cond: Expr, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInter
     Ok(())
 }
 pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let expr_range = expr.get_range_owned();
+    let cond_range = cond.get_range_owned();
     match plan {
         ReturnPlan::None => {}
         ReturnPlan::Return => {
@@ -498,35 +504,39 @@ pub fn compile_if_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Ve
         ReturnPlan::Move(_) => { return u_err!(expr.get_range(), "Cannot return a value from if statement."); }
         ReturnPlan::Push(tt) => { return u_err!(expr.get_range(), "Cannot return a value from if statement. Tried to push type {}", tt); }
     }
+    eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
-    let instr = InterInstr::Beq(f_label);
+    let instr = InterInstr::Beq(f_label, cond_range.to_owned());
     instrs.push(instr);
     compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
-    let instr = InterInstr::Lbl(f_label);
+    let instr = InterInstr::Lbl(f_label, cond_range);
     instrs.push(instr);
     if let ReturnPlan::Return = plan {
-        let instr = InterInstr::Rts;
+        let instr = InterInstr::Rts(expr_range);
         instrs.push(instr);
     }
     Ok(())
 }
 pub fn compile_if_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let cond_range = cond.get_range_owned();
     eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
     let e_label = fienv.get_new_label();    // end label
-    let instr = InterInstr::Beq(f_label);
+    let instr = InterInstr::Beq(f_label, cond_range.to_owned());
     instrs.push(instr);
     compile_expr(expr1, plan.clone(), instrs, fienv, env)?;
-    let instr = InterInstr::Goto(e_label);
+    let instr = InterInstr::Goto(e_label, cond_range.to_owned());
     instrs.push(instr);
-    let instr = InterInstr::Lbl(f_label);
+    let instr = InterInstr::Lbl(f_label, cond_range.to_owned());
     instrs.push(instr);
     compile_expr(expr2, plan, instrs, fienv, env)?;
-    let instr = InterInstr::Lbl(e_label);
+    let instr = InterInstr::Lbl(e_label, cond_range);
     instrs.push(instr);
     Ok(())
 }
 pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let expr_range = expr.get_range_owned();
+    let cond_range = cond.get_range_owned();
     match plan {
         ReturnPlan::None => {}
         ReturnPlan::Return => {
@@ -541,34 +551,37 @@ pub fn compile_unless_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mu
     }
     eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
-    let instr = InterInstr::Bne(f_label);
+    let instr = InterInstr::Bne(f_label, cond_range.to_owned());
     instrs.push(instr);
     compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
-    let instr = InterInstr::Lbl(f_label);
+    let instr = InterInstr::Lbl(f_label, cond_range);
     instrs.push(instr);
     if let ReturnPlan::Return = plan {
-        let instr = InterInstr::Rts;
+        let instr = InterInstr::Rts(expr_range);
         instrs.push(instr);
     }
     Ok(())
 }
 pub fn compile_unless_else(cond: Expr, expr1: Expr, expr2: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let cond_range = cond.get_range_owned();
     eval_cond(cond, instrs, fienv, env)?;
     let f_label = fienv.get_new_label();
     let e_label = fienv.get_new_label();    // end_label
-    let instr = InterInstr::Bne(f_label);
+    let instr = InterInstr::Bne(f_label, cond_range.to_owned());
     instrs.push(instr);
     compile_expr(expr1, plan.clone(), instrs, fienv, env)?;
-    let instr = InterInstr::Goto(e_label);
+    let instr = InterInstr::Goto(e_label, cond_range.to_owned());
     instrs.push(instr);
-    let instr = InterInstr::Lbl(f_label);
+    let instr = InterInstr::Lbl(f_label, cond_range.to_owned());
     instrs.push(instr);
     compile_expr(expr2, plan, instrs, fienv, env)?;
-    let instr = InterInstr::Lbl(e_label);
+    let instr = InterInstr::Lbl(e_label, cond_range);
     instrs.push(instr);
     Ok(())
 }
 pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let expr_range = expr.get_range_owned();
+    let cond_range = cond.get_range_owned();
     match plan {
         ReturnPlan::None => {}
         ReturnPlan::Return => {
@@ -583,30 +596,32 @@ pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut
     }
     let continue_label = fienv.get_new_label();
     let break_label = fienv.get_new_label();
-    let instr = InterInstr::Lbl(continue_label);
+    let instr = InterInstr::Lbl(continue_label, cond_range.to_owned());
     instrs.push(instr);
     eval_cond(cond, instrs, fienv, env)?;
-    let instr = InterInstr::Beq(break_label);
+    let instr = InterInstr::Beq(break_label, cond_range.to_owned());
     instrs.push(instr);
     fienv.push_loop_stack(break_label, continue_label);
     compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
     fienv.pop_loop_stack();
-    let instr = InterInstr::Lbl(break_label);
+    let instr = InterInstr::Lbl(break_label, cond_range);
     instrs.push(instr);
     if let ReturnPlan::Return = plan {
-        let instr = InterInstr::Rts;
+        let instr = InterInstr::Rts(expr_range);
         instrs.push(instr);
     }
     Ok(())
 }
 pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let expr_range = expr.get_range_owned();
+    let cond_range = cond.get_range_owned();
     let tt = expr.type_preference(fienv, env)?;
     let ret_place;
     match &plan {
         ReturnPlan::None => ret_place = None,
         ReturnPlan::Return => {
             if tt.is_array() || tt.is_struct() {
-                return u_err!(expr.get_range(), "Returning arrays and structs from functions not yet supported");
+                return u_err!(expr_range, "Returning arrays and structs from functions not yet supported");
             }
             if fienv.return_type().is_void() {
                 ret_place = None;
@@ -617,14 +632,14 @@ pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut V
         }
         ReturnPlan::Condition => {
             if tt.is_array() || tt.is_struct() {
-                return u_err!(expr.get_range(), "Cannot get condition codes from array or struct");
+                return u_err!(expr_range, "Cannot get condition codes from array or struct");
             }
             let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range_owned()))?;
             ret_place = Some(Place::DTemp(dtemp, tt));
         }
         ReturnPlan::Binop(b, _) => {
             if tt.is_array() || tt.is_struct() {
-                return u_err!(expr.get_range(), "Cannot do binop {} on array or struct", b);
+                return u_err!(expr_range, "Cannot do binop {} on array or struct", b);
             }
             let dtemp = fienv.get_data_temp(tt.clone(), Some(expr.get_range_owned()))?;
             ret_place = Some(Place::DTemp(dtemp, tt));
@@ -637,7 +652,7 @@ pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut V
     }
     let continue_label = fienv.get_new_label();
     let break_label = fienv.get_new_label();
-    let instr = InterInstr::Lbl(continue_label);
+    let instr = InterInstr::Lbl(continue_label, cond_range.to_owned());
     instrs.push(instr);
     fienv.push_loop_stack(break_label, continue_label);
     let body_plan = match &ret_place {
@@ -646,15 +661,15 @@ pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut V
     };
     compile_expr(expr, body_plan, instrs, fienv, env)?;
     eval_cond(cond, instrs, fienv, env)?;
-    let instr = InterInstr::Bne(continue_label);
+    let instr = InterInstr::Bne(continue_label, cond_range.to_owned());
     instrs.push(instr);
     fienv.pop_loop_stack();
-    let instr = InterInstr::Lbl(break_label);
+    let instr = InterInstr::Lbl(break_label, cond_range.to_owned());
     instrs.push(instr);
     if let Some(ret_place) = ret_place {
-        plan.into_inter_instr(ret_place, instrs, fienv, env)?;
+        plan.into_inter_instr(ret_place, expr_range, instrs, fienv, env)?;
     } else if let ReturnPlan::Return = plan {
-        let instr = InterInstr::Rts;
+        let instr = InterInstr::Rts(cond_range);
         instrs.push(instr);
     }
     Ok(())
@@ -662,7 +677,7 @@ pub fn compile_do_while(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut V
 pub fn compile_break(range: Range<usize>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), BudErr> {
     match fienv.get_break_label() {
         Some(break_label) => {
-            let instr = InterInstr::Goto(break_label);
+            let instr = InterInstr::Goto(break_label, range);
             instrs.push(instr);
         }
         None => {
@@ -674,7 +689,7 @@ pub fn compile_break(range: Range<usize>, _plan: ReturnPlan, instrs: &mut Vec<In
 pub fn compile_continue(range: Range<usize>, _plan: ReturnPlan, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, _env: &Environment) -> Result<(), BudErr> {
     match fienv.get_continue_label() {
         Some(continue_label) => {
-            let instr = InterInstr::Goto(continue_label);
+            let instr = InterInstr::Goto(continue_label, range);
             instrs.push(instr);
         }
         None => {
@@ -696,12 +711,12 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
             // to the stack, active regs can be saved before the function
             // call
             let rs_lbl = fienv.get_new_label();
-            let instr = InterInstr::Grs(rs_lbl);
+            let instr = InterInstr::Grs(rs_lbl, range.to_owned());
             instrs.push(instr);
             // Maybe I should use a separate number generator in fienv for
             // StackMarkers, but I'm lazy
             let marker = fienv.get_new_label();
-            let instr = InterInstr::SMarker(marker);
+            let instr = InterInstr::SMarker(marker, range.to_owned());
             instrs.push(instr);
             for (i, offset) in offsets.into_iter().enumerate() {
                 let tt = if i < args.len() {
@@ -714,11 +729,11 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
                 let plan = ReturnPlan::Push(tt);
                 compile_expr(offset, plan, instrs, fienv, env)?;
             }
-            let instr = InterInstr::Save(rs_lbl, fienv.get_active_temps());
+            let instr = InterInstr::Save(rs_lbl, fienv.get_active_temps(), range.to_owned());
             instrs.push(instr);
-            let instr = InterInstr::Call(id.clone(), marker);
+            let instr = InterInstr::Call(id.clone(), marker, range.to_owned());
             instrs.push(instr);
-            let place = env.ret_place(id, Some(range))?;
+            let place = env.ret_place(id, range)?;
             Ok(place)
         }
         None => {

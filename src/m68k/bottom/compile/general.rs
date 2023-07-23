@@ -37,7 +37,7 @@ pub fn get_instrs(
         atemp_map,
         fienv.label_gen,
         env,
-    );
+    )?;
     for iinstr in iinstrs {
         compile_iinstr(iinstr, &mut instrs, &mut fenv, env)?;
     }
@@ -79,37 +79,37 @@ fn get_temp_maps(
     let mut atemp_usages = HashMap::new();
     for iinstr in iinstrs {
         match iinstr {
-            InterInstr::Binop(left, _, right) | InterInstr::Move(left, right) => {
+            InterInstr::Binop(left, _, right, _) | InterInstr::Move(left, right, _) => {
                 update_temp_usages_by_place(&mut dtemp_usages, &mut atemp_usages, left);
                 update_temp_usages_by_place(&mut dtemp_usages, &mut atemp_usages, right);
             }
 
-            InterInstr::Binopi(_, _, place)
-            | InterInstr::Neg(place)
-            | InterInstr::Bnot(place)
-            | InterInstr::MoVA(_, place)
-            | InterInstr::Movi(_, place)
-            | InterInstr::Movs(_, place)
-            | InterInstr::Push(place)
-            | InterInstr::Tst(place) => {
+            InterInstr::Binopi(_, _, place, _)
+            | InterInstr::Neg(place, _)
+            | InterInstr::Bnot(place, _)
+            | InterInstr::MoVA(_, place, _)
+            | InterInstr::Movi(_, place, _)
+            | InterInstr::Movs(_, place, _)
+            | InterInstr::Push(place, _)
+            | InterInstr::Tst(place, _) => {
                 update_temp_usages_by_place(&mut dtemp_usages, &mut atemp_usages, place);
             }
 
-            InterInstr::Chki(_, dtemp) => update_temp_usages(&mut dtemp_usages, *dtemp),
-            InterInstr::Lea(atemp1, dtemp, _, atemp2) => {
+            InterInstr::Chki(_, dtemp, _) => update_temp_usages(&mut dtemp_usages, *dtemp),
+            InterInstr::Lea(atemp1, dtemp, _, atemp2, _) => {
                 update_temp_usages(&mut atemp_usages, *atemp1);
                 if let Some(dtemp) = dtemp {
                     update_temp_usages(&mut dtemp_usages, *dtemp);
                 }
                 update_temp_usages(&mut atemp_usages, *atemp2);
             }
-            InterInstr::Pea(atemp, dtemp, _) => {
+            InterInstr::Pea(atemp, dtemp, _, _) => {
                 update_temp_usages(&mut atemp_usages, *atemp);
                 if let Some(dtemp) = dtemp {
                     update_temp_usages(&mut dtemp_usages, *dtemp);
                 }
             }
-            InterInstr::Chk(atemp, dtemp1, _, dtemp2) => {
+            InterInstr::Chk(atemp, dtemp1, _, dtemp2, _) => {
                 update_temp_usages(&mut atemp_usages, *atemp);
                 if let Some(dtemp1) = dtemp1 {
                     update_temp_usages(&mut dtemp_usages, *dtemp1);
@@ -117,28 +117,28 @@ fn get_temp_maps(
                 update_temp_usages(&mut dtemp_usages, *dtemp2);
             }
 
-            InterInstr::Call(_, _) => {}
-            InterInstr::SMarker(_) => {}
-            InterInstr::Lbl(_) => {}
-            InterInstr::Goto(_) => {}
-            InterInstr::Rts => {}
-            InterInstr::Grs(_) => {}
-            InterInstr::Save(_, _) => {}
-            InterInstr::PuVA(_) => {}
-            InterInstr::Pusi(_, _) => {}
-            InterInstr::Puss(_) => {}
-            InterInstr::Tsti(_) => {}
-            InterInstr::Bcc(_) => {}
-            InterInstr::Bcs(_) => {}
-            InterInstr::Beq(_) => {}
-            InterInstr::Bge(_) => {}
-            InterInstr::Bgt(_) => {}
-            InterInstr::Ble(_) => {}
-            InterInstr::Blt(_) => {}
-            InterInstr::Bmi(_) => {}
-            InterInstr::Bne(_) => {}
-            InterInstr::Bpl(_) => {}
-            InterInstr::Bra(_) => {}
+            InterInstr::Call(_, _, _) => {}
+            InterInstr::SMarker(_, _) => {}
+            InterInstr::Lbl(_, _) => {}
+            InterInstr::Goto(_, _) => {}
+            InterInstr::Rts(_) => {}
+            InterInstr::Grs(_, _) => {}
+            InterInstr::Save(_, _, _) => {}
+            InterInstr::PuVA(_, _) => {}
+            InterInstr::Pusi(_, _, _) => {}
+            InterInstr::Puss(_, _) => {}
+            InterInstr::Tsti(_, _) => {}
+            InterInstr::Bcc(_, _) => {}
+            InterInstr::Bcs(_, _) => {}
+            InterInstr::Beq(_, _) => {}
+            InterInstr::Bge(_, _) => {}
+            InterInstr::Bgt(_, _) => {}
+            InterInstr::Ble(_, _) => {}
+            InterInstr::Blt(_, _) => {}
+            InterInstr::Bmi(_, _) => {}
+            InterInstr::Bne(_, _) => {}
+            InterInstr::Bpl(_, _) => {}
+            InterInstr::Bra(_, _) => {}
         }
     }
     let mut dtemp_popular = dtemp_usages
@@ -232,42 +232,42 @@ pub fn compile_iinstr(
     env: &Environment,
 ) -> Result<(), BudErr> {
     match iinstr {
-        InterInstr::Binop(src, b, dest) => compile_binop_iinstr(src, b, dest, instrs, fenv, env),
-        InterInstr::Binopi(imm, b, dest) => compile_binopi_iinstr(imm, b, dest, instrs, fenv, env),
-        InterInstr::Neg(place) => compile_neg_iinstr(place, instrs, fenv, env),
-        InterInstr::Bnot(place) => compile_bnot_iinstr(place, instrs, fenv, env),
-        InterInstr::Move(from, to) => compile_move_iinstr(from, to, instrs, fenv, env),
-        InterInstr::MoVA(name, to) => compile_mova_iinstr(name, to, instrs, fenv, env),
-        InterInstr::Movi(imm, to) => compile_movi_iinstr(imm, to, instrs, fenv, env),
-        InterInstr::Movs(string_lbl, to) => compile_movs_iinstr(string_lbl, to, instrs, fenv),
-        InterInstr::Lea(atemp, dtemp, off, to) => compile_lea_iinstr(atemp, dtemp, off, to, instrs, fenv),
-        InterInstr::Push(from) => compile_push_iinstr(from, instrs, fenv, env),
-        InterInstr::PuVA(name) => compile_puva_iinstr(name, instrs, fenv),
-        InterInstr::Pusi(imm, size) => compile_pusi_iinstr(imm, size, instrs),
-        InterInstr::Puss(string_lbl) => compile_puss_iinstr(string_lbl, instrs),
-        InterInstr::Pea(atemp, dtemp, off) => compile_pea_iinstr(atemp, dtemp, off, instrs, fenv),
-        InterInstr::Chk(atemp, dtemp, off, to) => compile_chk_iinstr(atemp, dtemp, off, to, instrs, fenv),
-        InterInstr::Chki(len, to) => compile_chki_iinstr(len as Imm, to, instrs, fenv),
-        InterInstr::SMarker(lbl) => { compile_smarker_iinstr(lbl, fenv); Ok(()) },
-        InterInstr::Grs(rs_lbl) => { compile_grs_iinstr(rs_lbl, fenv); Ok(()) },
-        InterInstr::Save(rs_lbl, temps) => compile_save_iinstr(rs_lbl, &temps, instrs, fenv),
-        InterInstr::Call(name, smarker_lbk) => compile_call_iinstr(name, smarker_lbk, instrs, fenv),
-        InterInstr::Lbl(lbl) => compile_lbl_iinstr(lbl, instrs),
-        InterInstr::Goto(lbl) => compile_goto_iinstr(lbl, instrs),
-        InterInstr::Rts => compile_rts_iinstr(instrs),
-        InterInstr::Tst(from) => compile_tst_iinstr(from, instrs, fenv, env),
-        InterInstr::Tsti(from) => compile_tsti_iinstr(from, instrs),
-        InterInstr::Bcc(lbl) => compile_bcc_iinstr(lbl, instrs),
-        InterInstr::Bcs(lbl) => compile_bcs_iinstr(lbl, instrs),
-        InterInstr::Beq(lbl) => compile_beq_iinstr(lbl, instrs),
-        InterInstr::Bge(lbl) => compile_bge_iinstr(lbl, instrs),
-        InterInstr::Bgt(lbl) => compile_bgt_iinstr(lbl, instrs),
-        InterInstr::Ble(lbl) => compile_ble_iinstr(lbl, instrs),
-        InterInstr::Blt(lbl) => compile_blt_iinstr(lbl, instrs),
-        InterInstr::Bmi(lbl) => compile_bmi_iinstr(lbl, instrs),
-        InterInstr::Bne(lbl) => compile_bne_iinstr(lbl, instrs),
-        InterInstr::Bpl(lbl) => compile_bpl_iinstr(lbl, instrs),
-        InterInstr::Bra(lbl) => compile_bra_iinstr(lbl, instrs),
+        InterInstr::Binop(src, b, dest, range) => compile_binop_iinstr(src, b, dest, range, instrs, fenv, env),
+        InterInstr::Binopi(imm, b, dest, range) => compile_binopi_iinstr(imm, b, dest, range, instrs, fenv, env),
+        InterInstr::Neg(place, range) => compile_neg_iinstr(place, range, instrs, fenv, env),
+        InterInstr::Bnot(place, range) => compile_bnot_iinstr(place, range, instrs, fenv, env),
+        InterInstr::Move(from, to, range) => compile_move_iinstr(from, to, range, instrs, fenv, env),
+        InterInstr::MoVA(name, to, range) => compile_mova_iinstr(name, to, range, instrs, fenv, env),
+        InterInstr::Movi(imm, to, range) => compile_movi_iinstr(imm, to, range, instrs, fenv, env),
+        InterInstr::Movs(string_lbl, to, range) => compile_movs_iinstr(string_lbl, to, range, instrs, fenv),
+        InterInstr::Lea(atemp, dtemp, off, to, range) => compile_lea_iinstr(atemp, dtemp, off, to, range, instrs, fenv),
+        InterInstr::Push(from, range) => compile_push_iinstr(from, range, instrs, fenv, env),
+        InterInstr::PuVA(name, range) => compile_puva_iinstr(name, range, instrs, fenv),
+        InterInstr::Pusi(imm, size, range) => compile_pusi_iinstr(imm, size, range, instrs),
+        InterInstr::Puss(string_lbl, range) => compile_puss_iinstr(string_lbl, range, instrs),
+        InterInstr::Pea(atemp, dtemp, off, range) => compile_pea_iinstr(atemp, dtemp, off, range, instrs, fenv),
+        InterInstr::Chk(atemp, dtemp, off, to, range) => compile_chk_iinstr(atemp, dtemp, off, to, range, instrs, fenv),
+        InterInstr::Chki(len, to, range) => compile_chki_iinstr(len as Imm, to, range, instrs, fenv),
+        InterInstr::SMarker(lbl, range) => { compile_smarker_iinstr(lbl, fenv); Ok(()) },
+        InterInstr::Grs(rs_lbl, range) => { compile_grs_iinstr(rs_lbl, fenv); Ok(()) },
+        InterInstr::Save(rs_lbl, temps, range) => compile_save_iinstr(rs_lbl, &temps, range, instrs, fenv),
+        InterInstr::Call(name, smarker_lbk, range) => compile_call_iinstr(name, smarker_lbk, range, instrs, fenv),
+        InterInstr::Lbl(lbl, range) => compile_lbl_iinstr(lbl, range, instrs),
+        InterInstr::Goto(lbl, range) => compile_goto_iinstr(lbl, range, instrs),
+        InterInstr::Rts(range) => compile_rts_iinstr(range, instrs),
+        InterInstr::Tst(from, range) => compile_tst_iinstr(from, range, instrs, fenv, env),
+        InterInstr::Tsti(from, range) => compile_tsti_iinstr(from, range, instrs),
+        InterInstr::Bcc(lbl, range) => compile_bcc_iinstr(lbl, range, instrs),
+        InterInstr::Bcs(lbl, range) => compile_bcs_iinstr(lbl, range, instrs),
+        InterInstr::Beq(lbl, range) => compile_beq_iinstr(lbl, range, instrs),
+        InterInstr::Bge(lbl, range) => compile_bge_iinstr(lbl, range, instrs),
+        InterInstr::Bgt(lbl, range) => compile_bgt_iinstr(lbl, range, instrs),
+        InterInstr::Ble(lbl, range) => compile_ble_iinstr(lbl, range, instrs),
+        InterInstr::Blt(lbl, range) => compile_blt_iinstr(lbl, range, instrs),
+        InterInstr::Bmi(lbl, range) => compile_bmi_iinstr(lbl, range, instrs),
+        InterInstr::Bne(lbl, range) => compile_bne_iinstr(lbl, range, instrs),
+        InterInstr::Bpl(lbl, range) => compile_bpl_iinstr(lbl, range, instrs),
+        InterInstr::Bra(lbl, range) => compile_bra_iinstr(lbl, range, instrs),
     }
 }
 

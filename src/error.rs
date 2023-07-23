@@ -63,18 +63,19 @@ pub fn display_err(err: BudErr, func: Option<&str>, lines: &[&str]) {
     println!();
     if let Some(range) = err.get_location() {
         let (start, end, delta) = find_line_numbers(range.clone(), lines);
-        let num_width = format!("{}", end).len();
+        let num_width = format!("{}", end + 1).len();
         let mut i = range.start - delta;
-        for line_num in start..end {
+        for (line_num, line) in lines[start..end].iter().enumerate() {
+            let line_num = line_num + start + 1;
             // Print out the line
             let line_num_str = format!("{}", line_num);
             let line_num_str = pad_spaces_beginning(&line_num_str, num_width);
             let line_num_str = format!("  {} |    ", line_num_str);
-            println!("{}{}", line_num_str, lines[line_num]);
+            println!("{}{}", line_num_str, line);
 
             // Print out the indicator
             print!("{}", " ".repeat(line_num_str.len()));
-            for _ in 0..lines[line_num].len() {
+            for _ in 0..line.len() {
                 if i >= range.start && i < range.end {
                     print!("{}", "^".yellow());
                 } else {
@@ -82,7 +83,7 @@ pub fn display_err(err: BudErr, func: Option<&str>, lines: &[&str]) {
                 } 
                 i += 1;
             }
-            print!("\n");
+            println!();
         }
         println!();
     }
@@ -106,8 +107,8 @@ fn pad_spaces_beginning(string: &str, length: usize) -> String {
 /// `delta` is the difference between the start of the line where `start` is and `start` itself
 fn find_line_numbers(range: Range<usize>, lines: &[&str]) -> (usize, usize, usize) {
     let (start, start_line_char) = find_line_number0(range.start, lines);
-    let end = start + find_line_number0(range.end - start_line_char, &lines[start..]).0;
-    (start, end, start - start_line_char)
+    let end = start + find_line_number0(range.end - 1 - start_line_char, &lines[start..]).0 + 1;
+    (start, end, range.start - start_line_char)
 }
 
 /// Returns the index of the line and the char index of the first char of that line

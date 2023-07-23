@@ -86,15 +86,15 @@ impl Place {
         }
     }
     /// Moves the value in the given DTemp to a new ATemp. This function frees the DTemp, and you must free the ATemp.
-    fn d_to_a(d: DTemp, tt: TypeType, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<ATemp, CompilerErr> {
-        match tt.get_data_size(env) {
+    fn d_to_a(d: DTemp, tt: TypeType, range: Range<usize>, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<ATemp, CompilerErr> {
+        match tt.get_data_size(env, Some(&range))? {
             Some(_) => {},
-            None => { return c_err!("DTemp {} containing large value", d); },
+            None => { return c_err!(range, "DTemp {} containing large value", d); },
         };
         let a = fienv.get_addr_temp();
         let d_place = Place::DTemp(d, tt);
         let a_place = Place::ATemp(a);
-        let instr = InterInstr::Move(d_place, a_place);
+        let instr = InterInstr::Move(d_place, a_place, range);
         instrs.push(instr);
         fienv.free_data_temp(d);
         Ok(a)
@@ -176,24 +176,24 @@ impl Place {
                 }
             } else if checked {
                 let tt = TypeType::Id("i16".to_owned());
-                let dtemp = fienv.get_data_temp(tt.clone(), Some(range.clone()))?;
+                let dtemp = fienv.get_data_temp(tt.clone(), Some(range.to_owned()))?;
                 let d_place = Place::DTemp(dtemp, tt);
-                let instr = InterInstr::Move(self.clone(), d_place.clone());
+                let instr = InterInstr::Move(self.clone(), d_place.clone(), range.to_owned());
                 instrs.push(instr);
                 if off != 0 {
-                    let instr = InterInstr::Binopi(off, BudBinop::Plus, d_place.clone());
+                    let instr = InterInstr::Binopi(off, BudBinop::Plus, d_place.clone(), range.to_owned());
                     instrs.push(instr);
                 }
-                let instr = InterInstr::Chki(len as i16, dtemp);
+                let instr = InterInstr::Chki(len as i16, dtemp, range.to_owned());
                 instrs.push(instr);
                 d_place.free(fienv);
             }
         }
         if !is_struct {
-            let size = tt.get_size(env) as i32;
+            let size = tt.get_size(env, Some(&range))? as i32;
             if let Some(d) = d {
                 let d_place = Place::DTemp(d, TypeType::Id("i32".to_owned()));
-                let instr = InterInstr::Binopi(size, BudBinop::Times, d_place);
+                let instr = InterInstr::Binopi(size, BudBinop::Times, d_place, range.to_owned());
                 instrs.push(instr);
             }
             off *= size;
@@ -204,7 +204,7 @@ impl Place {
                 if is_struct || is_array.is_some() {
                     c_err!(range, "Cannot store structs or arrays in data registers")
                 } else {
-                    Ok(Place::Ref(Self::d_to_a(d_, tt.clone(), instrs, fienv, env)?, d, off, tt))
+                    Ok(Place::Ref(Self::d_to_a(d_, tt.clone(), range, instrs, fienv, env)?, d, off, tt))
                 }
             },
             Place::Ref(a, mut d_, off_, _) => {
@@ -214,7 +214,7 @@ impl Place {
                         if let Some(d_) = d_ {
                             let d_place_ = Place::DTemp(d_, TypeType::Id("i32".to_owned()));
                             let d_place = Place::DTemp(d, TypeType::Id("i32".to_owned()));
-                            let instr = InterInstr::Binop(d_place, BudBinop::Plus, d_place_);
+                            let instr = InterInstr::Binop(d_place, BudBinop::Plus, d_place_, range);
                             instrs.push(instr);
                         } else {
                             d_ = Some(d);
@@ -226,7 +226,7 @@ impl Place {
                     // We actually want to index into the thing this Ref is pointing to
                     // which must be a pointer, since !(is_struct || is_array)
                     let a_place = Place::ATemp(a);
-                    let instr = InterInstr::Move(self, a_place);
+                    let instr = InterInstr::Move(self, a_place, range);
                     if let Some(d_) = d_ { fienv.free_data_temp(d_); }
                     instrs.push(instr);
                     Ok(Place::Ref(a, d, off, tt))
@@ -236,10 +236,10 @@ impl Place {
                 let a = fienv.get_addr_temp();
                 let a_place = Place::ATemp(a);
                 let instr = if is_struct || is_array.is_some() {
-                    InterInstr::MoVA(name.clone(), a_place)
+                    InterInstr::MoVA(name.clone(), a_place, range)
                 } else {
                     // self must be a pointer
-                    InterInstr::Move(self, a_place)
+                    InterInstr::Move(self, a_place, range)
                 };
                 instrs.push(instr);
                 Ok(Place::Ref(a, d, off, tt))

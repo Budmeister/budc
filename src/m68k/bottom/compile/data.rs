@@ -3,6 +3,8 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
+use std::ops::Range;
+
 use crate::{m68k::*, c_err, error::*};
 
 use log::*;
@@ -17,6 +19,7 @@ use Proxy::*;
 
 pub fn compile_neg_iinstr(
     src: Place,
+    range: Range<usize>,
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
     env: &Environment,
@@ -25,8 +28,8 @@ pub fn compile_neg_iinstr(
     if tt.is_array() || tt.is_struct() {
         return c_err!("Cannot negate value of type {}", tt);
     }
-    let size = tt.get_data_size(env).unwrap();
-    let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
+    let size = tt.get_data_size(env, Some(&range))?.unwrap();
+    let src = fenv.place_to_addr_mode(src, range, instrs, Proxy1)?;
     let instr = Neg(size, src).validate()?;
     instrs.push(instr);
     Ok(())
@@ -34,6 +37,7 @@ pub fn compile_neg_iinstr(
 
 pub fn compile_bnot_iinstr(
     src: Place,
+    range: Range<usize>,
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
     env: &Environment,
@@ -42,8 +46,8 @@ pub fn compile_bnot_iinstr(
     if tt.is_array() || tt.is_struct() {
         return c_err!("Cannot find NOT of value of type {}", tt);
     }
-    let size = tt.get_data_size(env).unwrap();
-    let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
+    let size = tt.get_data_size(env, Some(&range))?.unwrap();
+    let src = fenv.place_to_addr_mode(src, range, instrs, Proxy1)?;
     let instr = Tst(size, src.clone()).validate()?;
     instrs.push(instr);
     cc_to_ne(size, src, instrs, fenv)?;
@@ -53,6 +57,7 @@ pub fn compile_bnot_iinstr(
 pub fn compile_move_iinstr(
     src: Place,
     dest: Place,
+    range: Range<usize>,
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
     env: &Environment,
@@ -60,12 +65,12 @@ pub fn compile_move_iinstr(
     // Move using dest type
     let src_tt = src.get_type();
     let dest_tt = dest.get_type();
-    let src = fenv.place_to_addr_mode(src, instrs, Proxy1)?;
-    let dest = fenv.place_to_addr_mode(dest, instrs, Proxy2)?;
-    let src_size = src_tt.get_size(env);
-    let src_data_size = src_tt.get_data_size(env);
-    let mut dest_size = dest_tt.get_size(env);
-    let dest_data_size = dest_tt.get_data_size(env);
+    let src = fenv.place_to_addr_mode(src, range.to_owned(), instrs, Proxy1)?;
+    let dest = fenv.place_to_addr_mode(dest, range.to_owned(), instrs, Proxy2)?;
+    let src_size = src_tt.get_size(env, Some(&range))?;
+    let src_data_size = src_tt.get_data_size(env, Some(&range))?;
+    let mut dest_size = dest_tt.get_size(env, Some(&range))?;
+    let dest_data_size = dest_tt.get_data_size(env, Some(&range))?;
     if src_size < dest_size {
         if dest_tt.is_magic(env) || dest_tt.is_pointer() {
             let (src, _) = extend_efficient(
@@ -156,6 +161,7 @@ pub fn compile_move_iinstr(
 pub fn compile_movi_iinstr(
     imm: Imm,
     to: Place,
+    range: Range<usize>,
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
     env: &Environment,
@@ -169,7 +175,7 @@ pub fn compile_movi_iinstr(
         );
     }
     let size = to.get_data_size(env).unwrap();
-    let to = fenv.place_to_addr_mode(to, instrs, Proxy1)?;
+    let to = fenv.place_to_addr_mode(to, range, instrs, Proxy1)?;
     let instr = Move(size, imm.into(), to).validate()?;
     instrs.push(instr);
     Ok(())
@@ -180,6 +186,7 @@ pub fn compile_lea_iinstr(
     dtemp: Option<DTemp>,
     off: Imm,
     to: ATemp,
+    range: Range<usize>,
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
 ) -> Result<(), BudErr> {
@@ -191,7 +198,7 @@ pub fn compile_lea_iinstr(
     let instr = Lea(from, to_areg).validate()?;
     instrs.push(instr);
     if !live {
-        let to = fenv.place_to_addr_mode(Place::ATemp(to), instrs, Proxy2)?;
+        let to = fenv.place_to_addr_mode(Place::ATemp(to), range, instrs, Proxy2)?;
         let instr = Move(LWord, to_areg.into(), to).validate()?;
         instrs.push(instr);
     }

@@ -31,6 +31,7 @@ pub fn get_inter_instrs(expr: Expr, signature: &Signature, log_options: &Logging
     } else {
         plan = ReturnPlan::Move(Place::DTemp(0, signature.name.tt.clone()));
     }
+    let range = expr.get_range_owned();
     compile::compile_expr(
         expr,
         plan,
@@ -40,7 +41,7 @@ pub fn get_inter_instrs(expr: Expr, signature: &Signature, log_options: &Logging
     )?;
     if !fienv.cleanup_expr_created {
         if let Some(cleanup_label) = fienv.cleanup_label {
-            let instr = InterInstr::Lbl(cleanup_label);
+            let instr = InterInstr::Lbl(cleanup_label, range);
             instrs.push(instr);
         }
     }

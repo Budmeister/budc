@@ -11,9 +11,10 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use std::{collections::{HashMap, HashSet}, ops::{RangeFrom, Sub, Add}};
+use std::{collections::{HashMap, HashSet}, ops::{RangeFrom, Sub, Add, Range}};
 
 use Proxy::*;
+use log::error;
 
 use crate::{m68k::*, c_err, error::*};
 
@@ -150,10 +151,10 @@ impl FunctionEnvironment {
         atemp_map: HashMap<ATemp, Option<AReg>>,
         label_gen: RangeFrom<usize>,
         env: &Environment,
-    ) -> FunctionEnvironment {
+    ) -> Result<FunctionEnvironment, CompilerErr> {
         let stack_frame =
-            Self::generate_stack_frame(&signature, &vars, &dtemp_map, &atemp_map, env);
-        FunctionEnvironment {
+            Self::generate_stack_frame(&signature, &vars, &dtemp_map, &atemp_map, env)?;
+        Ok(FunctionEnvironment {
             lit_strings,
             vars,
             dtemp_map,
@@ -163,7 +164,7 @@ impl FunctionEnvironment {
             label_gen,
             stack_height: UncalculatedStackHeight { known: 0, reg_spaces: Vec::new(), neg_reg_spaces: Vec::new() },
             stack_frame,
-        }
+        })
     }
     /// Generates the stack frame. The stack frame is organized like this:
     /// ```txt
@@ -183,7 +184,7 @@ impl FunctionEnvironment {
         dtemp_map: &HashMap<DTemp, Option<DReg>>,
         atemp_map: &HashMap<ATemp, Option<AReg>>,
         env: &Environment,
-    ) -> HashMap<StackItem, i32> {
+    ) -> Result<HashMap<StackItem, i32>, CompilerErr> {
         // Build stack frame from the bottom up
         let mut stack_height: i32 = 0;
         let params = signature.args.iter().cloned().collect::<HashSet<Field>>();
@@ -194,7 +195,13 @@ impl FunctionEnvironment {
             if params.contains(var) {
                 continue;
             }
-            let size = var.tt.get_size(env);
+            let size = match var.tt.get_size(env, None) {
+                Ok(size) => size,
+                Err(err) => {
+                    error!("Unable to find size of local variable {} {}", var.tt, var.name);
+                    return Err(err);
+                }
+            };
             let item = StackItem::Var(var.name.clone());
             stack_frame.insert(item, stack_height);
             stack_height += size as i32;
@@ -224,13 +231,19 @@ impl FunctionEnvironment {
 
         // Add params to stack frame
         for param in &signature.args {
-            let size = param.tt.get_size(env);
+            let size = match param.tt.get_size(env, None) {
+                Ok(size) => size,
+                Err(err) => {
+                    error!("Unable to find size of local variable {} {}", param.tt, param.name);
+                    return Err(err);
+                }
+            };
             let item = StackItem::Var(param.name.clone());
             stack_frame.insert(item, stack_height);
             stack_height += size as i32;
         }
 
-        stack_frame
+        Ok(stack_frame)
     }
     /// Returns an addressing mode that points to this var exactly as if 
     /// `place_to_addr_mode` was called. The difference is that the caller
@@ -254,6 +267,7 @@ impl FunctionEnvironment {
     pub fn place_to_addr_mode(
         &self,
         place: Place,
+        range: Range<usize>,
         instrs: &mut Vec<ValidInstruction>,
         n: Proxy,
     ) -> Result<AddrMode, CompilerErr> {
@@ -266,6 +280,7 @@ impl FunctionEnvironment {
             Place::DTemp(dtemp, tt) => {
                 if tt.is_array() || tt.is_struct() {
                     return c_err!(
+                        range,
                         "Array or struct {} being stored in dtemp D{}",
                         tt, dtemp
                     );
@@ -482,6 +497,7 @@ impl FunctionEnvironment {
     pub fn place_to_dreg(
         &self,
         place: Place,
+        range: Range<usize>,
         instrs: &mut Vec<ValidInstruction>,
         env: &Environment,
         n: Proxy,
@@ -494,8 +510,13 @@ impl FunctionEnvironment {
                         name
                     );
                 }
+                if name.tt.is_void() {
+                    return c_err!(
+                        "Cannot move void into data reg"
+                    );
+                }
                 let proxy: DReg = n.into();
-                let size = name.tt.get_data_size(env).unwrap();
+                let size = name.tt.get_data_size(env, Some(&range))?.unwrap();
                 let from = self.stack_item_to_addr_mode(StackItem::Var(name.name))?;
                 let to = proxy.into();
                 let instr = Instruction::Move(size, from, to).validate()?;
@@ -525,7 +546,7 @@ impl FunctionEnvironment {
                 let areg = self.atemp_as_areg(atemp, instrs, n)?.0;
                 let dreg = self.opt_dtemp_as_opt_dreg(dtemp, instrs, n)?
                         .map(|dreg| dreg.0);
-                let size = tt.get_data_size(env).unwrap();
+                let size = tt.get_data_size(env, Some(&range))?.unwrap();
                 let from = (off, areg, dreg).into();
                 let proxy: DReg = n.into();
                 let to = proxy.into();
@@ -541,6 +562,7 @@ impl FunctionEnvironment {
     pub fn place_to_areg(
         &self,
         place: Place,
+        range: Range<usize>,
         instrs: &mut Vec<ValidInstruction>,
         env: &Environment,
         n: Proxy
@@ -554,7 +576,7 @@ impl FunctionEnvironment {
                     );
                 }
                 let proxy: AReg = n.into();
-                let size = name.tt.get_data_size(env).unwrap();
+                let size = name.tt.get_data_size(env, Some(&range))?.unwrap();
                 let from = self.stack_item_to_addr_mode(StackItem::Var(name.name))?;
                 let to = proxy.into();
                 let instr = Instruction::Move(size, from, to).validate()?;
@@ -566,7 +588,7 @@ impl FunctionEnvironment {
             }
             Place::DTemp(dtemp, tt) => {
                 let proxy: AReg = n.into();
-                let size = tt.get_data_size(env).unwrap();
+                let size = tt.get_data_size(env, Some(&range))?.unwrap();
                 let from = self.dtemp_to_addr_mode(dtemp)?;
                 let to = proxy.into();
                 let instr = Instruction::Move(size, from, to).validate()?;
@@ -583,7 +605,7 @@ impl FunctionEnvironment {
                 let areg = self.atemp_as_areg(atemp, instrs, n)?.0;
                 let dreg = self.opt_dtemp_as_opt_dreg(dtemp, instrs, n)?
                         .map(|dreg| dreg.0);
-                let size = tt.get_data_size(env).unwrap();
+                let size = tt.get_data_size(env, Some(&range))?.unwrap();
                 let from = (off, areg, dreg).into();
                 let proxy: AReg = n.into();
                 let to = proxy.into();

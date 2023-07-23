@@ -16,7 +16,7 @@
 
 use std::ops::Range;
 
-use crate::{bud::*, m68k::*, error::*, u_err, u_err_opt};
+use crate::{bud::*, m68k::*, error::*, u_err, c_err_opt};
 
 use super::{fienv::*, place::*, inter_instr::*};
 
@@ -118,14 +118,14 @@ impl IdExpr {
 }
 
 impl Environment {
-    pub fn ret_place(&self, name: String, range: Option<Range<usize>>) -> Result<Place, UserErr> {
+    pub fn ret_place(&self, name: String, range: Range<usize>) -> Result<Place, UserErr> {
         let sig = match self.global_funcs.get(&name) {
             Some(sig) => sig,
-            None => return u_err_opt!(range, "No global function {}", name),
+            None => return u_err!(range, "No global function {}", name),
         };
         let ret_tt = sig.name.tt.clone();
         if ret_tt.is_struct() || ret_tt.is_array() {
-            return u_err_opt!(range, "Returning arrays and structs from functions not yet supported");
+            return u_err!(range, "Returning arrays and structs from functions not yet supported");
         }
         Ok(Place::DTemp(0, ret_tt))
     }
@@ -143,22 +143,22 @@ impl Environment {
 }
 
 impl TypeType {
-    pub fn get_size(&self, env: &Environment) -> u32 {
+    pub fn get_size(&self, env: &Environment, range: Option<&Range<usize>>) -> Result<u32, CompilerErr> {
         match env.types.get(self) {
             Some(typ) => match typ.size {
-                Either::This(size) | Either::That((size, _)) => size
+                Either::This(size) | Either::That((size, _)) => Ok(size)
             }
-            None => panic!("Type {} not found", self)
+            None => c_err_opt!(range, "Type {} not found", self)
         }
     }
     // Returns None if the size is not a Byte, Word, or LWord
-    pub fn get_data_size(&self, env: &Environment) -> Option<DataSize> {
-        let size = self.get_size(env);
+    pub fn get_data_size(&self, env: &Environment, range: Option<&Range<usize>>) -> Result<Option<DataSize>, CompilerErr> {
+        let size = self.get_size(env, range)?;
         match size {
-            1 => Some(DataSize::Byte),
-            2 => Some(DataSize::Word),
-            4 => Some(DataSize::LWord),
-            _ => None,
+            1 => Ok(Some(DataSize::Byte)),
+            2 => Ok(Some(DataSize::Word)),
+            4 => Ok(Some(DataSize::LWord)),
+            _ => Ok(None),
         }
     }
     pub fn is_magic(&self, env: &Environment) -> bool {

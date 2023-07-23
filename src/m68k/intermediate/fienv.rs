@@ -16,7 +16,7 @@
 
 use std::ops::{RangeFrom, Range};
 
-use crate::{m68k::*, error::*, u_err, c_err_opt, u_err_opt};
+use crate::{m68k::*, error::*, u_err, c_err_opt};
 
 use log::*;
 
@@ -183,53 +183,53 @@ impl FunctionInterEnvironment {
         }
         temps.into_boxed_slice()
     }
-    pub fn ret(&mut self, place: Place, instrs: &mut Vec<InterInstr>, env: &Environment, range: Option<Range<usize>>) -> Result<(), UserErr> {
+    pub fn ret(&mut self, place: Place, instrs: &mut Vec<InterInstr>, env: &Environment, range: Range<usize>) -> Result<(), UserErr> {
         let tt = place.get_type();
         if tt != self.return_type() {
-            return u_err_opt!(range, "Function has return type {} but tried to return object of type {}", self.return_type(), tt);
+            return u_err!(range, "Function has return type {} but tried to return object of type {}", self.return_type(), tt);
         }
-        let to = env.ret_place(self.get_name(), range)?;
-        let instr = InterInstr::Move(place, to);
+        let to = env.ret_place(self.get_name(), range.to_owned())?;
+        let instr = InterInstr::Move(place, to, range.to_owned());
         instrs.push(instr);
-        let instr = InterInstr::Rts;
-        instrs.push(instr);
-        Ok(())
-    }
-    pub fn reti(&mut self, imm: Imm, instrs: &mut Vec<InterInstr>, env: &Environment, range: Option<Range<usize>>) -> Result<(), UserErr> {
-        let to = env.ret_place(self.get_name(), range)?;
-        let instr = InterInstr::Movi(imm, to);
-        instrs.push(instr);
-        let instr = InterInstr::Rts;
+        let instr = InterInstr::Rts(range);
         instrs.push(instr);
         Ok(())
     }
-    pub fn rets(&mut self, string: usize, instrs: &mut Vec<InterInstr>, env: &Environment, range: Option<Range<usize>>) -> Result<(), UserErr> {
+    pub fn reti(&mut self, imm: Imm, instrs: &mut Vec<InterInstr>, env: &Environment, range: Range<usize>) -> Result<(), UserErr> {
+        let to = env.ret_place(self.get_name(), range.to_owned())?;
+        let instr = InterInstr::Movi(imm, to, range.to_owned());
+        instrs.push(instr);
+        let instr = InterInstr::Rts(range);
+        instrs.push(instr);
+        Ok(())
+    }
+    pub fn rets(&mut self, string: usize, instrs: &mut Vec<InterInstr>, env: &Environment, range: Range<usize>) -> Result<(), UserErr> {
         let tt = Environment::get_str_tt();
         if tt != self.return_type() {
-            return u_err_opt!(range, "Function has return type {} but tried to return literal string of type {}", self.return_type(), tt);
+            return u_err!(range, "Function has return type {} but tried to return literal string of type {}", self.return_type(), tt);
         }
-        let to = env.ret_place(self.get_name(), range)?;
-        let instr = InterInstr::Movs(string, to);
+        let to = env.ret_place(self.get_name(), range.to_owned())?;
+        let instr = InterInstr::Movs(string, to, range.to_owned());
         instrs.push(instr);
-        let instr = InterInstr::Rts;
+        let instr = InterInstr::Rts(range);
         instrs.push(instr);
         Ok(())
     }
-    pub fn retva(&mut self, name: &String, instrs: &mut Vec<InterInstr>, env: &Environment, range: Option<Range<usize>>) -> Result<(), UserErr> {
+    pub fn retva(&mut self, name: &String, instrs: &mut Vec<InterInstr>, env: &Environment, range: Range<usize>) -> Result<(), UserErr> {
         let var = match self.get_var(name) {
             Some(name) => name,
             None => {
-                return u_err_opt!(range, "Trying to return pointer to local variable {} which does not exist", name);
+                return u_err!(range, "Trying to return pointer to local variable {} which does not exist", name);
             }
         };
         let tt = TypeType::Pointer(Box::new(var.tt.clone()));
         if tt != self.return_type() {
-            return u_err_opt!(range, "Function has return type {} but tried to return pointer to local variable {} of type {}", self.return_type(), var.name, var.tt);
+            return u_err!(range, "Function has return type {} but tried to return pointer to local variable {} of type {}", self.return_type(), var.name, var.tt);
         }
-        let to = env.ret_place(self.get_name(), range)?;
-        let instr = InterInstr::MoVA(var.name, to);
+        let to = env.ret_place(self.get_name(), range.to_owned())?;
+        let instr = InterInstr::MoVA(var.name, to, range.to_owned());
         instrs.push(instr);
-        let instr = InterInstr::Rts;
+        let instr = InterInstr::Rts(range);
         instrs.push(instr);
         Ok(())
     }
