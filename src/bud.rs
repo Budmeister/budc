@@ -547,12 +547,12 @@ impl Item {
                     range.to_owned(),
                 )),
                 _ => {
-                    return c_err!(range, "Invalid node for {} {:?}", N::FuncDecl, children);
+                    c_err!(range, "Invalid node for {} {:?}", N::FuncDecl, children)
                 }
             },
             [Node::NonTm {
                 n: N::StructDecl,
-                children: children,
+                children,
                 range,
             }] => match &children[..] {
                 [Node::Tm {
@@ -577,12 +577,12 @@ impl Item {
                     range.to_owned(),
                 )),
                 _ => {
-                    return c_err!(range, "Invalid node for {} {:?}", N::StructDecl, children);
+                    c_err!(range, "Invalid node for {} {:?}", N::StructDecl, children)
                 }
             },
             [Node::NonTm {
                 n: N::ImportDecl,
-                children: children,
+                children,
                 range,
             }] => match &children[..] {
                 [Node::Tm {
@@ -593,14 +593,14 @@ impl Item {
                     children: _path,
                     range,
                 }] => {
-                    return u_err!(range, "Import statements not supported yet");
+                    u_err!(range, "Import statements not supported yet")
                 }
                 _ => {
-                    return c_err!(range, "Invalid node for {} {:?}", N::ImportDecl, children);
+                    c_err!(range, "Invalid node for {} {:?}", N::ImportDecl, children)
                 }
             },
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::Item, children);
+                c_err!(range, "Invalid node for {} {:?}", N::Item, children)
             }
         }
     }
@@ -657,7 +657,7 @@ pub struct VarDecl {
 pub type VarDecls = Vec<VarDecl>;
 pub type Id = String;
 impl VarDecl {
-    pub fn new(children: &BudNodes, range: Range<usize>) -> Result<VarDecl, BudErr> {
+    pub fn new(children: &BudNodes, _range: Range<usize>) -> Result<VarDecl, BudErr> {
         match &children[..] {
             [Node::NonTm {
                 n: N::TypeExpr,
@@ -707,7 +707,7 @@ impl VarDecl {
                 }
                 [Node::Tm {
                     t: T::LeftRound,
-                    range,
+                    range: _,
                 }, Node::Tm {
                     t: T::RightRound,
                     range: _,
@@ -719,7 +719,7 @@ impl VarDecl {
                     range: _,
                 }, Node::NonTm {
                     n: N::VarDecls,
-                    children: children,
+                    children,
                     range,
                 }, Node::Tm {
                     t: T::RightRound,
@@ -769,7 +769,7 @@ impl Expr {
                 Ok(expr)
             }
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::Expr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::Expr, children)
             }
         }
     }
@@ -895,7 +895,7 @@ impl BinExpr {
                 range,
             )),
             _ => {
-                return c_err!("Invalid node for {} {:?}", N::BinaryExpr, children);
+                c_err!("Invalid node for {} {:?}", N::BinaryExpr, children)
             }
         }
     }
@@ -1064,7 +1064,7 @@ impl NonBinExpr {
                 range,
             )),
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::AssignExpr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::AssignExpr, children)
             }
         }
     }
@@ -1124,7 +1124,7 @@ impl NonBinExpr {
                 range,
             )),
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::ReturnExpr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::ReturnExpr, children)
             }
         }
     }
@@ -1141,7 +1141,7 @@ impl NonBinExpr {
                 range,
             }] => Ok(NonBinExpr::CleanupCall(range.to_owned())),
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::CleanupCall, children);
+                c_err!(range, "Invalid node for {} {:?}", N::CleanupCall, children)
             }
         }
     }
@@ -1165,7 +1165,7 @@ impl NonBinExpr {
                 range,
             )),
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::CleanupExpr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::CleanupExpr, children)
             }
         }
     }
@@ -1204,7 +1204,7 @@ impl NonBinExpr {
                 range,
             )),
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::ParenExpr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::ParenExpr, children)
             }
         }
     }
@@ -1216,7 +1216,7 @@ impl NonBinExpr {
             [Node::NonTm {
                 n: N::Unop,
                 children: u_children,
-                range: rangeu,
+                range: _rangeu,
             }, Node::NonTm {
                 n: N::NonBinExpr,
                 children: nbe,
@@ -1224,7 +1224,7 @@ impl NonBinExpr {
             }] => {
                 let u;
                 match &u_children[..] {
-                    [Node::Tm { t: u_t, range }] => {
+                    [Node::Tm { t: u_t, range: _ }] => {
                         u = u_t.clone();
                     }
                     _ => {
@@ -1238,7 +1238,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::UnaryExpr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::UnaryExpr, children)
             }
         }
     }
@@ -1271,7 +1271,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::IfExpr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::IfExpr, children)
             }
         }
     }
@@ -1314,7 +1314,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::IfElse, children);
+                c_err!(range, "Invalid node for {} {:?}", N::IfElse, children)
             }
         }
     }
@@ -1350,7 +1350,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::UnlExpr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::UnlExpr, children)
             }
         }
     }
@@ -1399,7 +1399,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::UnlElse, children);
+                c_err!(range, "Invalid node for {} {:?}", N::UnlElse, children)
             }
         }
     }
@@ -1429,7 +1429,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::WhileExpr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::WhileExpr, children)
             }
         }
     }
@@ -1462,7 +1462,7 @@ impl NonBinExpr {
                 ))
             }
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::DoWhile, children);
+                c_err!(range, "Invalid node for {} {:?}", N::DoWhile, children)
             }
         }
     }
@@ -1576,7 +1576,7 @@ impl IdExpr {
                 range: range1,
             }] => Ok(IdExpr::Deref(Box::new(IdExpr::new(ide, range1.to_owned())?), range)),
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::IdExpr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::IdExpr, children)
             }
         }
     }
@@ -1590,7 +1590,7 @@ impl IdExpr {
                 id_expr,
             ), range.to_owned())), range.to_owned())),
             with_semicolon: false,
-            range: range.to_owned()
+            range
         }
     }
     fn sqe_to_id_sqr(children: &BudNodes, range: Range<usize>) -> Result<IdExpr, BudErr> {
@@ -1608,13 +1608,13 @@ impl IdExpr {
                 Ok(id_expr)
             }
             _ => {
-                return c_err!(
+                c_err!(
                     range,
                     "Invalid node for {} being interpreted as {} {:?}",
                     N::SqrExpr,
                     N::IdExpr,
                     children
-                );
+                )
             }
         }
     }
@@ -1657,12 +1657,12 @@ impl IdExpr {
                 Ok(id_expr)
             }
             _ => {
-                return c_err!(
+                c_err!(
                     range,
                     "Invalid node for {} being interpreted as array indices {:?}",
                     N::Sqr,
                     sqr
-                );
+                )
             }
         }
     }
@@ -1737,7 +1737,7 @@ impl TypeExpr {
                 range: _,
             }] => Ok(TypeExpr::Pointer(Box::new(TypeExpr::new(typ, range1.to_owned())?), range)),
             _ => {
-                return c_err!(range, "Invalid node for {} {:?}", N::TypeExpr, children);
+                c_err!(range, "Invalid node for {} {:?}", N::TypeExpr, children)
             }
         }
     }
@@ -1757,13 +1757,13 @@ impl TypeExpr {
                 Ok(TypeExpr::TypSqr(id, lengths, range))
             }
             _ => {
-                return c_err!(
+                c_err!(
                     range,
                     "Invalid node for {} being interpreted as {} {:?}",
                     N::SqrExpr,
                     N::TypeExpr,
                     children
-                );
+                )
             }
         }
     }
@@ -1807,12 +1807,12 @@ impl TypeExpr {
                 Ok(())
             }
             _ => {
-                return c_err!(
+                c_err!(
                     range,
                     "Invalid node for {} being interpreted as array lengths {:?}",
                     N::Sqr,
                     children
-                );
+                )
             }
         }
     }
@@ -1837,18 +1837,18 @@ impl Literal {
         match &children[..] {
             [Node::Tm {
                 t: T::Num(num),
-                range,
+                range: _,
             }] => Ok(Literal::Num(*num)),
             [Node::Tm {
                 t: T::Str(string),
-                range,
+                range: _,
             }] => Ok(Literal::Str(string.to_owned())),
             [Node::Tm {
                 t: T::Char(char),
-                range,
+                range: _,
             }] => Ok(Literal::Num((Self::decode_char(char)? as u8).into())),
             _ => {
-                return c_err!("Invalid node for {} {:?}", N::LitExpr, children);
+                c_err!("Invalid node for {} {:?}", N::LitExpr, children)
             }
         }
     }
