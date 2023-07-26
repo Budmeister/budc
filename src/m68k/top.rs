@@ -28,10 +28,18 @@ impl BudExpander {
     pub fn get_built_in_types() -> HashMap<TypeType, Type> {
         [
             (
-                TypeType::Id("void".to_owned()),
+                Environment::get_void_tt(),
                 Type {
                     size: Either::This(0),
-                    typtyp: TypeType::Id("void".to_owned()),
+                    typtyp: Environment::get_void_tt(),
+                    magic: false,
+                }
+            ),
+            (   // Address registers count as void pointers
+                TypeType::Pointer(Box::new(Environment::get_void_tt())),
+                Type {
+                    size: Either::This(Self::REG_SIZE),
+                    typtyp: TypeType::Pointer(Box::new(Environment::get_void_tt())),
                     magic: false,
                 }
             ),
@@ -740,7 +748,7 @@ impl Function {
     }
     pub fn compile(self, log_options: &LoggingOptions, env: &Environment) -> Result<CompiledFunction, BudErr> {
         let (instrs, fienv) = get_inter_instrs(self.expr, &self.signature, log_options, env)?;
-        let instrs = get_instrs(instrs, fienv, env)?;
+        let instrs = get_instrs(instrs, &self.signature.name.name, fienv, env)?;
         let cfunc = CompiledFunction{ signature: self.signature, instructions: instrs };
         Ok(cfunc)
     }

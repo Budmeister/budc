@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use crate::{m68k::*, error::*};
 
 use bottom::{instruction::*, fenv::{FunctionEnvironment, Proxy}};
+use log::debug;
 use super::*;
 use binop::compile_binop_iinstr;
 use binopi::compile_binopi_iinstr;
@@ -24,6 +25,7 @@ use DataSize::*;
 
 pub fn get_instrs(
     iinstrs: Vec<InterInstr>,
+    name: &str,
     fienv: FunctionInterEnvironment,
     env: &Environment,
 ) -> Result<Vec<ValidInstruction>, BudErr> {
@@ -40,6 +42,10 @@ pub fn get_instrs(
     )?;
     for iinstr in iinstrs {
         compile_iinstr(iinstr, &mut instrs, &mut fenv, env)?;
+    }
+    debug!("Instructions for function {}", name);
+    for instr in &instrs {
+        debug!("\t{:?}", instr);
     }
     Ok(instrs)
 }

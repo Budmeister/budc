@@ -49,7 +49,7 @@ pub fn get_inter_instrs(expr: Expr, signature: &Signature, log_options: &Logging
     //  * String literals
     //  * All local variables (can be Fields)
     if log_options.print_inter_funcs {
-        debug!("Instructions for function {}", signature.name.name);
+        debug!("InterInstrs for function {}", signature.name.name);
         for instr in &instrs {
             debug!("\t{:?}", instr);
         }

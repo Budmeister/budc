@@ -321,29 +321,33 @@ impl ADBitField {
 }
 impl std::fmt::Display for ADBitField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            &format!(
-                "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
-                if self.d0 { "/d0" } else { "" },
-                if self.d1 { "/d1" } else { "" },
-                if self.d2 { "/d2" } else { "" },
-                if self.d3 { "/d3" } else { "" },
-                if self.d4 { "/d4" } else { "" },
-                if self.d5 { "/d5" } else { "" },
-                if self.d6 { "/d6" } else { "" },
-                if self.d7 { "/d7" } else { "" },
-                if self.a0 { "/a0" } else { "" },
-                if self.a1 { "/a1" } else { "" },
-                if self.a2 { "/a2" } else { "" },
-                if self.a3 { "/a3" } else { "" },
-                if self.a4 { "/a4" } else { "" },
-                if self.a5 { "/a5" } else { "" },
-                if self.a6 { "/a6" } else { "" },
-                if self.sp { "/sp" } else { "" },
-            )[1..]
-        )
+        if self.rs_size() == 0 {
+            write!(f, "")
+        } else {
+            write!(
+                f,
+                "{}",
+                &format!(
+                    "{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}",
+                    if self.d0 { "/d0" } else { "" },
+                    if self.d1 { "/d1" } else { "" },
+                    if self.d2 { "/d2" } else { "" },
+                    if self.d3 { "/d3" } else { "" },
+                    if self.d4 { "/d4" } else { "" },
+                    if self.d5 { "/d5" } else { "" },
+                    if self.d6 { "/d6" } else { "" },
+                    if self.d7 { "/d7" } else { "" },
+                    if self.a0 { "/a0" } else { "" },
+                    if self.a1 { "/a1" } else { "" },
+                    if self.a2 { "/a2" } else { "" },
+                    if self.a3 { "/a3" } else { "" },
+                    if self.a4 { "/a4" } else { "" },
+                    if self.a5 { "/a5" } else { "" },
+                    if self.a6 { "/a6" } else { "" },
+                    if self.sp { "/sp" } else { "" },
+                )[1..]
+            )
+        }
     }
 }
 impl std::fmt::Debug for ADBitField {

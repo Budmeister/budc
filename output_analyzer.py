@@ -330,15 +330,15 @@ def read_inter_funcs(lines, index):
             return index
         while lines[index] != "End inter funcs":
             name = None
-            if lines[index].startswith("Instructions for function "):
-                name = lines[index][len("Instructions for function "):]
+            if lines[index].startswith("InterInstrs for function "):
+                name = lines[index][len("InterInstrs for function "):]
             else:
                 return index
             index += 1
             if index >= len(lines):
                 return index
             instrs = []
-            while not lines[index].startswith("Instructions for function ") and lines[index] != "End inter funcs":
+            while not lines[index].startswith("InterInstrs for function ") and lines[index] != "End inter funcs":
                 instrs.append(lines[index])
                 index += 1
                 if index >= len(lines):
