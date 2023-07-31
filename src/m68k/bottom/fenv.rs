@@ -14,7 +14,7 @@
 use std::{collections::{HashMap, HashSet}, ops::{RangeFrom, Sub, Add, Range}};
 
 use Proxy::*;
-use log::error;
+use log::{error, debug};
 
 use crate::{m68k::*, c_err, error::*};
 
@@ -23,7 +23,7 @@ use super::instruction::*;
 use ADReg::*;
 use AReg::SP;
 
-#[derive(Hash, Clone, Eq, PartialEq)]
+#[derive(Hash, Clone, Eq, PartialEq, Debug)]
 pub enum StackItem {
     Var(String),
     DTemp(DTemp),
@@ -134,12 +134,15 @@ impl Sub<StackHeight> for UncalculatedStackHeight {
 pub struct FunctionEnvironment {
     pub lit_strings: Vec<(usize, String)>,
     pub vars: Vec<Field>,
+    name: Field,
     dtemp_map: HashMap<DTemp, Option<DReg>>,
     atemp_map: HashMap<ATemp, Option<AReg>>,
     smarker_map: HashMap<usize, UncalculatedStackHeight>,
     rs_map: HashMap<usize, (UncalculatedStackHeight, Option<ADBitField>)>,
     stack_height: UncalculatedStackHeight,
-    stack_frame: HashMap<StackItem, i32>,
+    stack_frame: HashMap<StackItem, StackHeight>,
+    /// Top of the top item on the stack frame
+    ceiling: StackHeight,
     label_gen: RangeFrom<usize>,
 }
 impl FunctionEnvironment {
@@ -152,11 +155,12 @@ impl FunctionEnvironment {
         label_gen: RangeFrom<usize>,
         env: &Environment,
     ) -> Result<FunctionEnvironment, CompilerErr> {
-        let stack_frame =
+        let (stack_frame, ceiling) =
             Self::generate_stack_frame(&signature, &vars, &dtemp_map, &atemp_map, env)?;
         Ok(FunctionEnvironment {
             lit_strings,
             vars,
+            name: signature.name,
             dtemp_map,
             atemp_map,
             smarker_map: HashMap::new(),
@@ -164,6 +168,7 @@ impl FunctionEnvironment {
             label_gen,
             stack_height: UncalculatedStackHeight { known: 0, reg_spaces: Vec::new(), neg_reg_spaces: Vec::new() },
             stack_frame,
+            ceiling,
         })
     }
     /// Generates the stack frame. The stack frame is organized like this:
@@ -184,11 +189,12 @@ impl FunctionEnvironment {
         dtemp_map: &HashMap<DTemp, Option<DReg>>,
         atemp_map: &HashMap<ATemp, Option<AReg>>,
         env: &Environment,
-    ) -> Result<HashMap<StackItem, i32>, CompilerErr> {
+    ) -> Result<(HashMap<StackItem, i32>, StackHeight), CompilerErr> {
         // Build stack frame from the bottom up
         let mut stack_height: i32 = 0;
         let params = signature.args.iter().cloned().collect::<HashSet<Field>>();
         let mut stack_frame = HashMap::new();
+        let mut ceiling = 0;
 
         // Add local vars to stack frame
         for var in vars.iter().rev() {
@@ -205,6 +211,7 @@ impl FunctionEnvironment {
             let item = StackItem::Var(var.name.clone());
             stack_frame.insert(item, stack_height);
             stack_height += size as i32;
+            ceiling = stack_height;
         }
 
         // Add spilled regs to stack frame
@@ -218,6 +225,7 @@ impl FunctionEnvironment {
             let item = StackItem::DTemp(*dtemp);
             stack_frame.insert(item, stack_height);
             stack_height += size;
+            ceiling = stack_height;
         }
         for (atemp, areg) in atemp_map {
             if areg.is_some() {
@@ -227,6 +235,7 @@ impl FunctionEnvironment {
             let item = StackItem::ATemp(*atemp);
             stack_frame.insert(item, stack_height);
             stack_height += size;
+            ceiling = stack_height;
         }
 
         // Add params to stack frame
@@ -241,9 +250,10 @@ impl FunctionEnvironment {
             let item = StackItem::Var(param.name.clone());
             stack_frame.insert(item, stack_height);
             stack_height += size as i32;
+            ceiling = stack_height;
         }
 
-        Ok(stack_frame)
+        Ok((stack_frame, ceiling))
     }
     /// Returns an addressing mode that points to this var exactly as if 
     /// `place_to_addr_mode` was called. The difference is that the caller
@@ -710,6 +720,124 @@ impl FunctionEnvironment {
         dtemp
                 .map(|dtemp| self.dtemp_as_dreg(dtemp, instrs, n))
                 .transpose()
+    }
+
+    pub fn print_stack_frame<'a>(&'a self) -> Result<(), CompilerErr> {
+        /// Represents a horizontal bar in the printed stack frame
+        #[derive(Copy, Clone, Debug)]
+        struct StackComponent<'b> {
+            height: StackHeight,
+            item: Option<&'b StackItem>,
+            smarker: Option<usize>,
+            reg_space: Option<(usize, ADBitField)>,
+        }
+
+        let mut components: HashMap<StackHeight, StackComponent<'a>> = HashMap::new();
+
+        // Add stack items
+        for (item, height) in &self.stack_frame {
+            components.insert(*height, StackComponent {
+                height: *height,
+                item: Some(item),
+                smarker: None,
+                reg_space: None,
+            });
+        }
+        // Add SMarkers
+        for (smarker, ush) in &self.smarker_map {
+            let height = self.calculate_stack_height(ush)?
+                .map(Ok)
+                .unwrap_or_else(|| c_err!("Stack height for SMarker {} never calculated: {:?}", smarker, ush))?;
+            match components.get_mut(&height) {
+                Some(component) => component.smarker = Some(*smarker),
+                None => {
+                    components.insert(height, StackComponent {
+                        height,
+                        item: None,
+                        smarker: Some(*smarker),
+                        reg_space: None,
+                    });
+                }
+            }
+        }
+        // Add Reg Spaces
+        for (rs_lbl, (ush, adbf_opt)) in &self.rs_map {
+            let height = self.calculate_stack_height(ush)?
+                .map(Ok)
+                .unwrap_or_else(|| c_err!("Stack height for Reg Space {} never calculated: {:?}", rs_lbl, ush))?;
+            let adbf = adbf_opt
+                .map(Ok)
+                .unwrap_or_else(|| c_err!("Reg Space {} didn't have registers", rs_lbl))?;
+            match components.get_mut(&height) {
+                Some(component) => component.reg_space = Some((*rs_lbl, adbf)),
+                None => {
+                    components.insert(height, StackComponent {
+                        height,
+                        item: None,
+                        smarker: None,
+                        reg_space: Some((*rs_lbl, adbf)),
+                    });
+                }
+            }
+        }
+        if components.is_empty() {
+            debug!("Function {} had an empty stack frame", self.name.name);
+            return Ok(());
+        }
+
+        let mut components: Vec<StackComponent<'_>> = components
+            .into_values()
+            .collect();
+        // Sort descending
+        components.sort_by(|comp1, comp2| comp2.height.cmp(&comp1.height));
+
+        // We know that components is not empty
+        let first = components.first().unwrap();
+        let mut prev_height = self.ceiling;
+
+        let horiz = "--------------------------";
+        let blank = " ".repeat(horiz.len());
+        println!("+{}+ {}", horiz, self.ceiling);
+
+        for comp in components {
+            let diff = prev_height - comp.height;
+            let string = format!("{} {} {}", match comp.item {
+                Some(StackItem::ATemp(atemp)) => format!("A{}", atemp),
+                Some(StackItem::DTemp(dtemp)) => format!("D{}", dtemp),
+                Some(StackItem::Var(var)) => var.to_owned(),
+                None => "".to_owned(),
+            }, match comp.smarker {
+                Some(smarker) => format!("Smarker{}", smarker),
+                None => "".to_owned(),
+            }, match comp.reg_space {
+                Some((rs_lbl, adbf)) => format!("RegSpace{}: {}", rs_lbl, adbf),
+                None => "".to_owned(),
+            }).trim().to_owned();
+            if diff >= 0 {
+                let temp = (diff - 1) as usize;
+                if temp > 10 {
+                    for _ in 0..10 {
+                        println!("|{}|", blank);
+                    }
+                } else {
+                    for _ in 0..temp {
+                        println!("|{}|", blank);
+                    }
+                }
+                let bytes = format!("{} bytes", diff);
+                let left = if bytes.len() >= horiz.len() { 0 } else { (horiz.len() - bytes.len()) / 2 };
+                let right = if bytes.len() >= horiz.len() { 0 } else { horiz.len() - bytes.len() - left };
+                println!("|{}{}{}|", " ".repeat(left), bytes, " ".repeat(right));
+                
+                let left = if string.len() >= horiz.len() { 0 } else { (horiz.len() - string.len()) / 2 };
+                let right = if string.len() >= horiz.len() { 0 } else { horiz.len() - string.len() - left };
+                println!("|{}{}{}|", " ".repeat(left), string, " ".repeat(right));
+            }
+            println!("+{}+ {} {}", horiz, comp.height, if comp.height == 0 { "<--- start (esh == 0)" } else { "" });
+            prev_height = comp.height;
+        }
+
+        Ok(())
     }
 }
 

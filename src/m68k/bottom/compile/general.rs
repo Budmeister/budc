@@ -47,6 +47,7 @@ pub fn get_instrs(
     for instr in &instrs {
         debug!("\t{:?}", instr);
     }
+    fenv.print_stack_frame()?;
     Ok(instrs)
 }
 fn update_temp_usages(temp_usages: &mut HashMap<usize, u32>, temp: usize) {
@@ -190,6 +191,7 @@ fn get_temp_maps(
 
     (dtemp_map, atemp_map)
 }
+
 pub fn extend(
     dreg: DReg,
     from: DataSize,
