@@ -275,6 +275,12 @@ impl BudExpander {
 
 
 type TypeSize = Either<u32, (u32, HashMap<String, (u32, TypeType)>)>;   // Choice<size, (size_of_struct, HashMap<field_name, (field_offset, field_type)>)>
+impl TypeSize {
+    fn get_mag(&self) -> u32 {
+        let (Either::This(size) | Either::That((size, _))) = self;
+        *size
+    }
+}
 
 // #[derive(Eq, PartialEq, Debug)]
 enum TypeSizeState {
@@ -350,10 +356,11 @@ impl TypeSizeGenerator {
                     TypeType::Array(subtyp, len) => {
                         let subtyp_clone = (**subtyp).clone();
                         let len = *len;
-                        let (Either::This(subsize) | Either::That((subsize, _))) = Self::get_size(size_generators, subtyp_clone, top)?;
+                        let subsize = Self::get_size(size_generators, subtyp_clone, top)?.get_mag();
+                        let size = Either::This(Self::correct_size(subsize * len as u32));
                         size_generators.get_mut(&index).unwrap().state =
-                            TypeSizeState::Calculated(Either::This(subsize * len as u32));
-                        Ok(Either::This(subsize * len as u32))
+                            TypeSizeState::Calculated(size.clone());
+                        Ok(size)
                     }
                     TypeType::Id(name) => {
                         // Must be a built-in type
@@ -369,13 +376,14 @@ impl TypeSizeGenerator {
                                     TypeSizeState::BeingCalculated;                                         // This line is really
                                 // generator.state = TypeSizeState::BeingCalculated;                        // this line
                                 let size = Self::get_size(size_generators, field.tt, top.clone())?;   // I had to change it for the borrow checker
+                                let mag = size.get_mag();
                                 size_generators.get_mut(&index).unwrap().state =
                                     TypeSizeState::Calculated(size.clone());                                // And this line is really
-                                // generator.state = TypeSizeState::Calculated(size);                       // this line
-                                let (Either::This(size) | Either::That((size, _))) = size;
-                                Ok(size)
+                                // generator.state = TypeSizeState::Calculated(size);     
+                                Ok(mag)
                             })
                             .collect::<Result<Vec<u32>, BudErr>>()?;
+                        // size is already corrected
                         let (layout, size) = Environment::get_struct_layout_from_sizes(&sizes);
                         let fields = fields
                             .iter()
@@ -396,7 +404,14 @@ impl TypeSizeGenerator {
                     ),
                 }
             }
-            None => c_err!("Type not found: {}", index),
+            None => c_err!("Type not found {} during generation of type {}", index, top),
+        }
+    }
+    fn correct_size(prev: u32) -> u32 {
+        if prev == 1 || prev % 2 == 0{
+            prev
+        } else {
+            prev + 1
         }
     }
 }
@@ -554,6 +569,7 @@ impl Environment {
                 position += 1;
             }
         }
+        position = TypeSizeGenerator::correct_size(position);
         (layout, position)
     }
 

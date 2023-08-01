@@ -190,6 +190,14 @@ impl FunctionEnvironment {
         atemp_map: &HashMap<ATemp, Option<AReg>>,
         env: &Environment,
     ) -> Result<(HashMap<StackItem, i32>, StackHeight), CompilerErr> {
+        
+        fn add_stack_height(height: &mut i32, add: i32) {
+            *height += add;
+            if *height % 2 == 1 {
+                *height += 1;
+            }
+        }
+
         // Build stack frame from the bottom up
         let mut stack_height: i32 = 0;
         let params = signature.args.iter().cloned().collect::<HashSet<Field>>();
@@ -210,7 +218,7 @@ impl FunctionEnvironment {
             };
             let item = StackItem::Var(var.name.clone());
             stack_frame.insert(item, stack_height);
-            stack_height += size as i32;
+            add_stack_height(&mut stack_height, size as i32);
             ceiling = stack_height;
         }
 
@@ -224,7 +232,7 @@ impl FunctionEnvironment {
             let size = 4;
             let item = StackItem::DTemp(*dtemp);
             stack_frame.insert(item, stack_height);
-            stack_height += size;
+            add_stack_height(&mut stack_height, size as i32);
             ceiling = stack_height;
         }
         for (atemp, areg) in atemp_map {
@@ -234,7 +242,7 @@ impl FunctionEnvironment {
             let size = 4;
             let item = StackItem::ATemp(*atemp);
             stack_frame.insert(item, stack_height);
-            stack_height += size;
+            add_stack_height(&mut stack_height, size as i32);
             ceiling = stack_height;
         }
 
@@ -249,7 +257,7 @@ impl FunctionEnvironment {
             };
             let item = StackItem::Var(param.name.clone());
             stack_frame.insert(item, stack_height);
-            stack_height += size as i32;
+            add_stack_height(&mut stack_height, size as i32);
             ceiling = stack_height;
         }
 

@@ -300,17 +300,16 @@ fn main() {
         }
     }
     let expander = m68k::BudExpander::new();
-    match expander.code_generate(&log_options, tree) {
-        Ok(code) => {
-
-        }
+    let lines = get_lines(&contents);
+    let env = match expander.code_generate(&log_options, tree) {
+        Ok(env) => env,
         Err(errors) => {
             error!("{}", format!("Unable to compile due to {} errors", errors.len()));
             for (err, func) in errors {
-                let lines = get_lines(&contents);
                 display_err(err, func.as_deref(), &lines);
             }
             return;
         }
-    }
+    };
+    
 }
