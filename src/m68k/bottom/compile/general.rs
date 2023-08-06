@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::{m68k::*, error::*};
+use crate::{m68k::{*, bottom::compile::optimize_one::optimize_one}, error::*};
 
 use bottom::{instruction::*, fenv::{FunctionEnvironment, Proxy}};
 use log::debug;
@@ -43,6 +43,12 @@ pub fn get_instrs(
     for iinstr in iinstrs {
         compile_iinstr(iinstr, &mut instrs, &mut fenv, env)?;
     }
+    let mut instrs_new = Vec::new();
+    for instr in instrs {
+        optimize_one(instr, &mut instrs_new, &fenv)?;
+    }
+    let instrs = instrs_new;
+
     debug!("Instructions for function {}", name);
     for instr in &instrs {
         debug!("\t{:?}", instr);

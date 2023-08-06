@@ -302,6 +302,7 @@ fn main() {
             return;
         }
     }
+    
     let expander = m68k::BudExpander::new();
     let lines = error::get_lines(&contents);
     let env = match expander.code_generate(&log_options, tree) {

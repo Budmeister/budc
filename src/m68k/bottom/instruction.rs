@@ -128,6 +128,11 @@ pub enum NumOrLbl {
     Lbl(usize),
     Sum(UncalculatedStackHeight),
 }
+impl NumOrLbl {
+    pub fn is_zero(&self) -> bool {
+        matches!(self, Self::Num(0))
+    }
+}
 impl std::fmt::Display for NumOrLbl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -212,7 +217,7 @@ impl std::fmt::Display for AddrMode {
             AddrMode::AInd(a) => write!(f, "({})", a),
             AddrMode::AIndInc(a) => write!(f, "({})+", a),
             AddrMode::AIndDec(a) => write!(f, "-({})", a),
-            AddrMode::AIndDisp(i, a) => write!(f, "{}({})", i, a),
+            AddrMode::AIndDisp(i, a) => if i.is_zero() { write!(f, "({})", a) } else { write!(f, "{}({})", i, a) },
             AddrMode::AIndIdxDisp(i, a, ad) => write!(f, "({}, {}, {})", i, a, ad),
             AddrMode::AbsW(abs) => write!(f, "{}", abs),
             AddrMode::AbsL(abs) => write!(f, "{}", abs),
@@ -370,6 +375,12 @@ pub struct ValidInstruction(Instruction);
 impl ValidInstruction {
     pub fn get(self) -> Instruction {
         self.0
+    }
+    pub fn get_ref(&self) -> &Instruction {
+        &self.0
+    }
+    pub fn get_mut(&mut self) -> &mut Instruction {
+        &mut self.0
     }
 }
 impl TryFrom<Instruction> for ValidInstruction {
