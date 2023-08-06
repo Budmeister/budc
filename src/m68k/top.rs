@@ -764,8 +764,8 @@ impl Function {
     }
     pub fn compile(self, log_options: &LoggingOptions, env: &Environment) -> Result<CompiledFunction, BudErr> {
         let (instrs, fienv) = get_inter_instrs(self.expr, &self.signature, log_options, env)?;
-        let instrs = get_instrs(instrs, &self.signature.name.name, fienv, env)?;
-        let cfunc = CompiledFunction{ signature: self.signature, instructions: instrs };
+        let (instrs, fenv) = get_instrs(instrs, &self.signature.name.name, fienv, env)?;
+        let cfunc = CompiledFunction{ signature: self.signature, instructions: instrs, lit_strings: fenv.lit_strings };
         Ok(cfunc)
     }
 

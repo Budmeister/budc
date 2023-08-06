@@ -18,10 +18,8 @@ use logos::Logos;
 pub mod tools;
 pub mod logging;
 use logging::SimpleLogger;
-use log::{error, debug};
+use log::*;
 
-use crate::error::{display_err, get_lines};
-use crate::grammar::*;
 use crate::logging::LoggingOptions;
 
 use std::collections::HashSet;
@@ -132,6 +130,11 @@ fn main() {
         return;
     }
     let filename = args[1].to_string();
+    if !filename.ends_with(".bud") {
+        println!("Input file must end with \".bud\". Given file: {}", filename);
+    }
+    let dot = filename.len() - ".bud".len();
+    let output_filename = filename[..dot].to_string() + ".S";
     let args: HashSet<String> = args.into_iter().collect();
     // Set up logger
     match log::set_logger(&LOGGER)
@@ -182,11 +185,11 @@ fn main() {
     use bud::BudTerminal::*;
     let mut g = bud::get_bud_grammar();
     if log_options.print_grammar {
-        print_grammar(&g);
+        grammar::print_grammar(&g);
     }
 
     let states;
-    match lr1_generate(
+    match grammar::lr1_generate(
         &log_options,
         &mut g,
         Start,
@@ -300,16 +303,28 @@ fn main() {
         }
     }
     let expander = m68k::BudExpander::new();
-    let lines = get_lines(&contents);
+    let lines = error::get_lines(&contents);
     let env = match expander.code_generate(&log_options, tree) {
         Ok(env) => env,
         Err(errors) => {
             error!("{}", format!("Unable to compile due to {} errors", errors.len()));
             for (err, func) in errors {
-                display_err(err, func.as_deref(), &lines);
+                error::display_err(err, func.as_deref(), &lines);
             }
             return;
         }
     };
+
+    match m68k::write_file(env, &output_filename) {
+        Ok(_) => {},
+        Err(err) => {
+            println!("While saving to file: ");
+            println!();
+            println!("{}", format!("    User Error: {}", err.msg).red().bold());
+        }
+    }
+
+    println!();
+    println!("{}", "Compilation complete!".green());
     
 }

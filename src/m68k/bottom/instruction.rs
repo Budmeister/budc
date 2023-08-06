@@ -367,6 +367,11 @@ use super::{UncalculatedStackHeight, RegisterSpaceSize};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct ValidInstruction(Instruction);
+impl ValidInstruction {
+    pub fn get(self) -> Instruction {
+        self.0
+    }
+}
 impl TryFrom<Instruction> for ValidInstruction {
     type Error = CompilerErr;
 

@@ -66,9 +66,9 @@ pub enum DataSize {
 impl std::fmt::Display for DataSize {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", match self {
-            DataSize::Byte => "b",
-            DataSize::Word => "w",
-            DataSize::LWord => "l",
+            DataSize::Byte => ".b",
+            DataSize::Word => ".w",
+            DataSize::LWord => ".l",
         })
     }
 }

@@ -2,3 +2,4 @@
 .vscode/*
 output.txt
 *.code-workspace
+*.S

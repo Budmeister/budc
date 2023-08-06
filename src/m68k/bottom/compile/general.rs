@@ -28,7 +28,7 @@ pub fn get_instrs(
     name: &str,
     fienv: FunctionInterEnvironment,
     env: &Environment,
-) -> Result<Vec<ValidInstruction>, BudErr> {
+) -> Result<(Vec<ValidInstruction>, FunctionEnvironment), BudErr> {
     let mut instrs = Vec::new();
     let (dtemp_map, atemp_map) = get_temp_maps(&iinstrs);
     let mut fenv = FunctionEnvironment::new(
@@ -48,7 +48,7 @@ pub fn get_instrs(
         debug!("\t{:?}", instr);
     }
     fenv.print_stack_frame()?;
-    Ok(instrs)
+    Ok((instrs, fenv))
 }
 fn update_temp_usages(temp_usages: &mut HashMap<usize, u32>, temp: usize) {
     match temp_usages.get_mut(&temp) {
@@ -256,8 +256,8 @@ pub fn compile_iinstr(
         InterInstr::Pea(atemp, dtemp, off, range) => compile_pea_iinstr(atemp, dtemp, off, range, instrs, fenv),
         InterInstr::Chk(atemp, dtemp, off, to, range) => compile_chk_iinstr(atemp, dtemp, off, to, range, instrs, fenv),
         InterInstr::Chki(len, to, range) => compile_chki_iinstr(len as Imm, to, range, instrs, fenv),
-        InterInstr::SMarker(lbl, range) => { compile_smarker_iinstr(lbl, fenv); Ok(()) },
-        InterInstr::Grs(rs_lbl, range) => { compile_grs_iinstr(rs_lbl, fenv); Ok(()) },
+        InterInstr::SMarker(lbl, _) => { compile_smarker_iinstr(lbl, fenv); Ok(()) },
+        InterInstr::Grs(rs_lbl, _) => { compile_grs_iinstr(rs_lbl, fenv); Ok(()) },
         InterInstr::Save(rs_lbl, temps, range) => compile_save_iinstr(rs_lbl, &temps, range, instrs, fenv),
         InterInstr::Call(name, smarker_lbk, range) => compile_call_iinstr(name, smarker_lbk, range, instrs, fenv),
         InterInstr::Lbl(lbl, range) => compile_lbl_iinstr(lbl, range, instrs),
@@ -282,5 +282,6 @@ pub fn compile_iinstr(
 #[derive(Clone)]
 pub struct CompiledFunction {
     pub signature: Signature,
+    pub lit_strings: Vec<(usize, String)>,
     pub instructions: Vec<ValidInstruction>,
 }
