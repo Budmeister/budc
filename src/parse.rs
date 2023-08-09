@@ -3,7 +3,7 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use crate::{grammar::*, logging::LoggingOptions, error::*};
+use crate::{grammar::*, logging::LoggingOptions, error::*, c_err, u_err};
 use colored::Colorize;
 use logos::{Lexer, Logos};
 use log::{debug, error};
@@ -50,8 +50,8 @@ fn do_action<'a, T, N>(
     node_stack: &mut Vec<Node<T, N>>,
     mut state_num: usize,
     states: &Vec<State<T, N>>,
-    load_data: fn(T, &str) -> T
-) -> Result<Option<T>, String>
+    load_data: fn(T, &str, Range<usize>) -> Result<T, UserErr>
+) -> Result<Option<T>, BudErr>
 where
     T: PartialEq + Eq + Hash + Display + Debug + Logos<'a>,
     N: PartialEq + Eq + Hash + Display + Clone,
@@ -80,8 +80,8 @@ where
                     slice_location.end = usize::max(slice_location.end, node.get_range().end);
                     children.push(node);
                 } else {
-                    return Err(
-                        "Mismatched stacks! Needed more children, but node_stack was empty!".to_string()
+                    return c_err!(
+                        "Mismatched stacks! Needed more children, but node_stack was empty!"
                     );
                 }
             }
@@ -99,10 +99,10 @@ where
                     state_stack.push(**goto);
                 }
                 None => {
-                    return Err(format!(
+                    return c_err!(
                         "No goto available for {} in state {}. Quitting.",
                         n, state_num
-                    ));
+                    );
                 }
             }
             if log_options.print_actions {
@@ -115,7 +115,7 @@ where
                 debug!("Shifting state {} onto the stack", next_state);
             }
             state_stack.push(*next_state);
-            let node = Node::Tm{ t: load_data(tok, slice), range: slice_location };
+            let node = Node::Tm{ t: load_data(tok, slice, slice_location.clone())?, range: slice_location };
             node_stack.push(node);
             if log_options.print_actions {
                 debug!("Stack: {:?}", state_stack);
@@ -126,7 +126,7 @@ where
             let mut first_shift = None;
             let mut first_reduce = None;
             if actions.len() < 2 {
-                return Err(format!("Invalid action - Multi-action with less than two actions: {:?}, in state {}:", actions, state_num));
+                return c_err!("Invalid action - Multi-action with less than two actions: {:?}, in state {}:", actions, state_num);
             }
             for action in actions {
                 match action {
@@ -141,7 +141,7 @@ where
                         }
                     }
                     Action::Multi(_) => {
-                        return Err(format!("Invalid action - Multi-action containing multi-actions: {:?}, in state {}", actions, state_num));
+                        return c_err!("Invalid action - Multi-action containing multi-actions: {:?}, in state {}", actions, state_num);
                     }
                 }
             }
@@ -157,7 +157,7 @@ where
                     tok.to_string().blue(), state_num, actions, action
                 );
             } else {
-                return Err(format!("Did not find a valid action in Multi-action: {:?}", actions));
+                return c_err!("Did not find a valid action in Multi-action: {:?}", actions);
             }
             do_action(
                 log_options,
@@ -174,10 +174,10 @@ where
         }
         None => {
             let options = &states[*state_stack.last().unwrap()].next.keys();
-            return Err(format!(
+            return u_err!(
                 "Syntax Error on token {} at location {} (state {}). Expected: {:?}",
                 tok.to_string().blue(), slice_location.start, state_num.to_string().red(), options
-            ));
+            );
         }
     }
 }
@@ -188,8 +188,8 @@ pub fn lr1_parse<'a, T, N>(
     lex: &mut Lexer<'a, T>,
     eof: T,
     error: T,
-    load_data: fn(T, &str) -> T
-) -> Result<Vec<Node<T, N>>, String>
+    load_data: fn(T, &str, Range<usize>) -> Result<T, UserErr>
+) -> Result<Vec<Node<T, N>>, BudErr>
 where
     T: PartialEq + Eq + Hash + Display + Debug + Clone + Logos<'a, Source = str>,
     N: PartialEq + Eq + Hash + Display + Clone,
@@ -202,9 +202,9 @@ where
     while state_stack.len() != 0 {
         if let Some(mut tok) = lex.next() {
             if tok == error {
-                return Err(format!(
-                    "Invalid token encountered {} at location {}", lex.slice().blue(), lex.span().start
-                ));
+                return c_err!(
+                    lex.span(), "Invalid token encountered {} at location {}", lex.slice().blue(), lex.span().start
+                );
             }
             loop {
                 let state_num = *state_stack.last().unwrap();

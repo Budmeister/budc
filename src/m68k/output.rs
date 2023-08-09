@@ -5,7 +5,7 @@
 
 use std::{fs::File, io::{BufWriter, Write}, path::Path};
 
-use crate::{error::UserErr, u_err, m68k::DataSize};
+use crate::{error::UserErr, u_err, m68k::DataSize, bud::escape};
 
 use super::{Environment, CompiledFunction, ValidInstruction, AddrMode, ADBitField, DReg, AReg};
 
@@ -57,7 +57,7 @@ fn write_func(func: CompiledFunction, writer: &mut BufWriter<File>) -> Result<()
 fn write_func_preamble(name: &str, lit_strings: Vec<(usize, String)>, writer: &mut BufWriter<File>) -> Result<(), IOErr> {
     for (lbl, lit_string) in lit_strings {
         writeln!(writer, ".LC{}:", lbl)?;
-        writeln!(writer, "\t.ascii \"{}\\0\"", lit_string)?;
+        writeln!(writer, "\t.ascii \"{}\\0\"", escape(&lit_string))?;
     }
     
     writeln!(writer, "\t.even")?;

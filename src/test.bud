@@ -1,4 +1,8 @@
 
+void printf(@(i8) str) {
+    i32 a = 0;
+}
+
 i32 fun(i32[3] a, i32 b, @(i32) c, i32[4][3][2] e, i8[3] g) {
     fun(a, b, c, e, g);
     b = a(b+4);
@@ -10,6 +14,7 @@ i32 fun(i32[3] a, i32 b, @(i32) c, i32[4][3][2] e, i8[3] g) {
     b = c[1];
     i32 s = 0;
     while (b < 10) {
+        printf("b: %d, s: %d \n \r \t \\ \' \" \c \x7e", b, s);
         s = s + b;
         b = b + 1;
     }

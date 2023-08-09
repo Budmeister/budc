@@ -3,7 +3,7 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use crate::{c_err, u_err, error::*};
+use crate::{c_err, u_err, error::*, u_err_opt};
 use std::fmt::{Debug, Display};
 use std::ops::Range;
 
@@ -13,7 +13,7 @@ grammar::grammar!(
     BudTerminal: {
         #[regex("-?[0-9]+")]
         NumGen,
-        #[regex(r#""([^"]*)""#)]
+        #[regex(r#""([^"\\]|\\.)*""#)]
         StrGen,
         #[regex(r"'(\\[^\n]|[^\\])'")]
         CharGen,
@@ -277,18 +277,101 @@ grammar::grammar!(
     }
 );
 
-pub fn load_bud_data(t: BudTerminal, slice: &str) -> BudTerminal {
-    match t {
+pub fn load_bud_data(t: BudTerminal, slice: &str, range: Range<usize>) -> Result<BudTerminal, UserErr> {
+    let retval = match t {
         BudTerminal::IdGen => BudTerminal::Id(slice.to_string()),
         BudTerminal::NumGen => BudTerminal::Num(if let Ok(num) = slice.parse() {
             num
         } else {
             panic!("Invalid number: {}", slice)
         }),
-        BudTerminal::StrGen => BudTerminal::Str(slice.to_string()),
-        BudTerminal::CharGen => BudTerminal::Char(slice.to_string()),
+        BudTerminal::StrGen => {
+            let start = 1;
+            let end = slice.len() - 1;
+            BudTerminal::Str(unescape(&slice[start..end], Some(range))?)
+        },
+        BudTerminal::CharGen => {
+            let start = 1;
+            let end = slice.len() - 1;
+            BudTerminal::Char(unescape(&slice[start..end], Some(range))?)
+        },
         _ => t,
+    };
+    Ok(retval)
+}
+
+pub fn escape(s: &str) -> String {
+    let mut escaped = String::new();
+    for ch in s.chars() {
+        match ch {
+            '\n' => escaped = escaped + "\\n",
+            '\r' => escaped = escaped + "\\r",
+            '\t' => escaped = escaped + "\\t",
+            '\\' => escaped = escaped + "\\\\",
+            '\"' => escaped = escaped + "\\\"",
+            '\'' => escaped = escaped + "\\'",
+            ch => escaped.push(ch),
+        }
     }
+    escaped
+}
+
+pub fn unescape(s: &str, range_opt: Option<Range<usize>>) -> Result<String, UserErr> {
+    let mut unescaped = String::new();
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            match chars.next() {
+                Some('n') => unescaped.push('\n'),
+                Some('r') => unescaped.push('\r'),
+                Some('t') => unescaped.push('\t'),
+                Some('\'') => unescaped.push('\''),
+                Some('\"') => unescaped.push('\"'),
+                Some('\\') => unescaped.push('\\'),
+                Some('u') => {
+                    let unicode: String = chars.clone().take(4).collect();
+                    let unicode = match u32::from_str_radix(&unicode, 16) {
+                        Ok(unicode) => unicode,
+                        Err(err) => return u_err_opt!(range_opt, "Unable to convert to number: {}", err),
+                    };
+                    let unicode = match char::from_u32(unicode) {
+                        Some(unicode) => unicode,
+                        None => return u_err_opt!(range_opt, "Unable to convert to unicode: {}", unicode),
+                    };
+                    chars.nth(4);
+                    unescaped.push(unicode);
+                },
+                Some('U') => {
+                    let unicode: String = chars.clone().take(8).collect();
+                    let unicode = match u32::from_str_radix(&unicode, 16) {
+                        Ok(unicode) => unicode,
+                        Err(err) => return u_err_opt!(range_opt, "Unable to convert to number: {}", err),
+                    };
+                    let unicode = match char::from_u32(unicode) {
+                        Some(unicode) => unicode,
+                        None => return u_err_opt!(range_opt, "Unable to convert to unicode: {}", unicode),
+                    };
+                    chars.nth(8);
+                    unescaped.push(unicode);
+                },
+                Some('x') => {
+                    let unicode: String = chars.clone().take(2).collect();
+                    let unicode = match u8::from_str_radix(&unicode, 16) {
+                        Ok(unicode) => unicode,
+                        Err(err) => return u_err_opt!(range_opt, "Unable to convert to number: {}", err),
+                    };
+                    let unicode = char::from(unicode);
+                    chars.nth(2);
+                    unescaped.push(unicode);
+                },
+                Some(ch) => unescaped.push(ch),
+                None => return u_err_opt!(range_opt, "Illegal, found \\ at the end of a string"),
+            }
+        } else {
+            unescaped.push(ch);
+        }
+    }
+    Ok(unescaped)
 }
 
 #[derive(PartialEq, Eq, Clone, Hash)]

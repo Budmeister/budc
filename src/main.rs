@@ -180,6 +180,7 @@ fn main() {
             return;
         }
     }
+    let lines = error::get_lines(&contents);
 
     use bud::BudNonTerminal::*;
     use bud::BudTerminal::*;
@@ -297,14 +298,13 @@ fn main() {
             }
             tree = node_stack.into_iter().next().unwrap();
         }
-        Err(msg) => {
-            error!("{}", msg.yellow());
+        Err(err) => {
+            error::display_err(err, None, &lines);
             return;
         }
     }
     
     let expander = m68k::BudExpander::new();
-    let lines = error::get_lines(&contents);
     let env = match expander.code_generate(&log_options, tree) {
         Ok(env) => env,
         Err(errors) => {
