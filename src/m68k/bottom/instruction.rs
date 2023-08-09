@@ -28,14 +28,14 @@ impl std::fmt::Display for DReg {
             f,
             "{}",
             match self {
-                DReg::D0 => "d0",
-                DReg::D1 => "d1",
-                DReg::D2 => "d2",
-                DReg::D3 => "d3",
-                DReg::D4 => "d4",
-                DReg::D5 => "d5",
-                DReg::D6 => "d6",
-                DReg::D7 => "d7",
+                DReg::D0 => "%d0",
+                DReg::D1 => "%d1",
+                DReg::D2 => "%d2",
+                DReg::D3 => "%d3",
+                DReg::D4 => "%d4",
+                DReg::D5 => "%d5",
+                DReg::D6 => "%d6",
+                DReg::D7 => "%d7",
             }
         )
     }
@@ -59,14 +59,14 @@ impl std::fmt::Display for AReg {
             f,
             "{}",
             match self {
-                AReg::A0 => "a0",
-                AReg::A1 => "a1",
-                AReg::A2 => "a2",
-                AReg::A3 => "a3",
-                AReg::A4 => "a4",
-                AReg::A5 => "a5",
-                AReg::A6 => "a6",
-                AReg::SP => "sp",
+                AReg::A0 => "%a0",
+                AReg::A1 => "%a1",
+                AReg::A2 => "%a2",
+                AReg::A3 => "%a3",
+                AReg::A4 => "%a4",
+                AReg::A5 => "%a5",
+                AReg::A6 => "%a6",
+                AReg::SP => "%sp",
             }
         )
     }

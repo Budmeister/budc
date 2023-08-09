@@ -169,7 +169,7 @@ fn write_tst_instr(size: DataSize, dest: AddrMode, writer: &mut BufWriter<File>)
 }
 
 fn write_cmp_instr(size: DataSize, src: AddrMode, dest: DReg, writer: &mut BufWriter<File>) -> Result<(), IOErr> {
-    writeln!(writer, "\tcmp{}, {}, {}", size, src, dest)
+    writeln!(writer, "\tcmp{} {}, {}", size, src, dest)
 }
 
 fn write_eor_instr(size: DataSize, src: DReg, dest: AddrMode, writer: &mut BufWriter<File>) -> Result<(), IOErr> {
