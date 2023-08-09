@@ -143,7 +143,7 @@ pub struct FunctionEnvironment {
     stack_frame: HashMap<StackItem, StackHeight>,
     /// Top of the top item on the stack frame
     ceiling: StackHeight,
-    label_gen: RangeFrom<usize>,
+    pub label_gen: RangeFrom<usize>,
 }
 impl FunctionEnvironment {
     pub fn new(

@@ -49,7 +49,7 @@ pub struct FunctionInterEnvironment {
     pub atemps: Vec<bool>,
 }
 impl FunctionInterEnvironment {
-    pub fn new(sig: Signature) -> FunctionInterEnvironment {
+    pub fn new(sig: Signature, label_gen: RangeFrom<usize>) -> FunctionInterEnvironment {
         FunctionInterEnvironment {
             vars: sig.args.clone(),
             sig,
@@ -57,7 +57,7 @@ impl FunctionInterEnvironment {
             cleanup_label: None,
             cleanup_expr_created: false,
             loop_stack: Vec::new(),
-            label_gen: 0..,
+            label_gen,
             dtemps: Vec::new(),
             atemps: Vec::new(),
         }

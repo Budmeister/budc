@@ -5,6 +5,7 @@
 //! Year:       2023
 
 use std::collections::{HashMap, HashSet};
+use std::ops::RangeFrom;
 
 use crate::bud::{BinExpr, Expr, NonBinExpr, TypeExpr, VarDecl};
 use crate::error::*;
@@ -256,10 +257,17 @@ impl BudExpander {
 
         // Compile all funcs
         let mut errors = Vec::new();
+        let mut label_gen = Some(0..);
         for (name, func) in funcs {
-            match func.compile(log_options, &environment) {
-                Ok(cfunc) => environment.compiled_funcs.push(cfunc),
-                Err(err) => errors.push((err, Some(name))),
+            match func.compile(label_gen.unwrap_or_else(|| 0..), log_options, &environment) {
+                Ok((cfunc, label_gen_)) => {
+                    environment.compiled_funcs.push(cfunc);
+                    label_gen = Some(label_gen_);
+                },
+                Err(err) => {
+                    errors.push((err, Some(name)));
+                    label_gen = None;
+                },
             };
         }
         if log_options.print_inter_funcs {
@@ -762,11 +770,11 @@ impl Function {
             expr,
         }
     }
-    pub fn compile(self, log_options: &LoggingOptions, env: &Environment) -> Result<CompiledFunction, BudErr> {
-        let (instrs, fienv) = get_inter_instrs(self.expr, &self.signature, log_options, env)?;
+    pub fn compile(self, label_gen: RangeFrom<usize>, log_options: &LoggingOptions, env: &Environment) -> Result<(CompiledFunction, RangeFrom<usize>), BudErr> {
+        let (instrs, fienv) = get_inter_instrs(self.expr, &self.signature, label_gen, log_options, env)?;
         let (instrs, fenv) = get_instrs(instrs, &self.signature.name.name, fienv, env)?;
         let cfunc = CompiledFunction{ signature: self.signature, instructions: instrs, lit_strings: fenv.lit_strings };
-        Ok(cfunc)
+        Ok((cfunc, fenv.label_gen))
     }
 
 }
