@@ -719,7 +719,7 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
             let instr = InterInstr::SMarker(marker, range.to_owned());
             instrs.push(instr);
             let mut sh: StackHeight = 0;
-            for (i, offset) in offsets.into_iter().enumerate() {
+            for (i, offset) in offsets.into_iter().enumerate().rev() {
                 let tt = if i < args.len() {
                     args[i].tt.clone()
                 } else {
