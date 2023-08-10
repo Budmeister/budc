@@ -718,6 +718,7 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
             let marker = fienv.get_new_label();
             let instr = InterInstr::SMarker(marker, range.to_owned());
             instrs.push(instr);
+            let mut sh: StackHeight = 0;
             for (i, offset) in offsets.into_iter().enumerate() {
                 let tt = if i < args.len() {
                     args[i].tt.clone()
@@ -726,12 +727,15 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
                     warn!("Type used for {}th argument: {}", i, tt);
                     tt
                 };
+                sh += tt.get_size(env, Some(&range))? as StackHeight;
                 let plan = ReturnPlan::Push(tt);
                 compile_expr(offset, plan, instrs, fienv, env)?;
             }
             let instr = InterInstr::Save(rs_lbl, fienv.get_active_temps(), range.to_owned());
             instrs.push(instr);
             let instr = InterInstr::Call(id.clone(), marker, range.to_owned());
+            instrs.push(instr);
+            let instr = InterInstr::IncSP(sh, range.to_owned());
             instrs.push(instr);
             let place = env.ret_place(id, range)?;
             Ok(place)

@@ -23,6 +23,7 @@ pub enum InterInstr {
     Movi(Imm, Place, Range<usize>),
     Movs(usize, Place, Range<usize>),                         // Move string literal (by the string literal's global label)
     Lea(ATemp, Option<DTemp>, i32, ATemp, Range<usize>),      // Load effective address into an address register
+    IncSP(StackHeight, Range<usize>),                                 // Add the value to SP
     Push(Place, Range<usize>),
     PuVA(String, Range<usize>),
     Pusi(Imm, DataSize, Range<usize>),

@@ -126,6 +126,7 @@ pub enum NumOrLbl {
     Num(Imm),
     NamedLbl(String),
     Lbl(usize),
+    Str(usize),
     Sum(UncalculatedStackHeight),
 }
 impl NumOrLbl {
@@ -138,7 +139,8 @@ impl std::fmt::Display for NumOrLbl {
         match self {
             Self::Num(num) => write!(f, "{}", num),
             Self::NamedLbl(lbl) => write!(f, "{}", lbl),
-            Self::Lbl(lbl) => write!(f, "{}", lbl),
+            Self::Lbl(lbl) => write!(f, ".L{}", lbl),
+            Self::Str(lbl) => write!(f, ".LC{}", lbl),
             Self::Sum(ush) => write!(f, "{:?}", ush),
         }
     }
@@ -259,7 +261,13 @@ where T: Into<NumOrLbl> {
 }
 impl From<NumOrLbl> for AddrMode {
     fn from(value: NumOrLbl) -> Self {
-        Self::Imm(value)
+        match &value {
+            NumOrLbl::Num(_) => Self::Imm(value),
+            NumOrLbl::NamedLbl(_) => Self::Imm(value),
+            NumOrLbl::Lbl(_) => Self::AbsL(value),
+            NumOrLbl::Str(_) => Self::Imm(value),
+            NumOrLbl::Sum(_) => Self::AIndDisp(value, AReg::SP),
+        }
     }
 }
 

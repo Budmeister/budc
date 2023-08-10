@@ -34,7 +34,7 @@ pub fn compile_mova_iinstr(name: String, to: Place, range: Range<usize>, instrs:
 }
 
 pub fn compile_movs_iinstr(string_lbl: usize, to: Place, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
-    let from = NumOrLbl::Lbl(string_lbl).into();
+    let from = NumOrLbl::Str(string_lbl).into();
     let to = fenv.place_to_addr_mode(to, range, instrs, Proxy1)?;
     let instr = Move(LWord, from, to).validate()?;
     instrs.push(instr);
@@ -140,7 +140,7 @@ pub fn compile_pusi_iinstr(imm: Imm, size: DataSize, range: Range<usize>, instrs
 }
 
 pub fn compile_puss_iinstr(string_lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
-    let from = NumOrLbl::Lbl(string_lbl).into();
+    let from = NumOrLbl::Str(string_lbl).into();
     let instr = Move(LWord, from, AddrMode::get_push()).validate()?;
     instrs.push(instr);
     Ok(())

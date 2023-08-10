@@ -152,6 +152,7 @@ fn get_temp_maps(
             InterInstr::Bne(_, _) => {}
             InterInstr::Bpl(_, _) => {}
             InterInstr::Bra(_, _) => {}
+            InterInstr::IncSP(_, _) => {}
         }
     }
     let mut dtemp_popular = dtemp_usages
@@ -255,6 +256,7 @@ pub fn compile_iinstr(
         InterInstr::Movi(imm, to, range) => compile_movi_iinstr(imm, to, range, instrs, fenv, env),
         InterInstr::Movs(string_lbl, to, range) => compile_movs_iinstr(string_lbl, to, range, instrs, fenv),
         InterInstr::Lea(atemp, dtemp, off, to, range) => compile_lea_iinstr(atemp, dtemp, off, to, range, instrs, fenv),
+        InterInstr::IncSP(inc, range) => compile_incsp_iinstr(inc, range, instrs),
         InterInstr::Push(from, range) => compile_push_iinstr(from, range, instrs, fenv, env),
         InterInstr::PuVA(name, range) => compile_puva_iinstr(name, range, instrs, fenv),
         InterInstr::Pusi(imm, size, range) => compile_pusi_iinstr(imm, size, range, instrs),

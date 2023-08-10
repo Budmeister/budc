@@ -1,5 +1,5 @@
 
-void printf2(@(i8) str) {
+void printf(@(i8) str) {
     i32 a = 0;
 }
 
@@ -14,9 +14,15 @@ i32 fun(i32[3] a, i32 b, @(i32) c, i32[4][3][2] e, i8[3] g) {
     b = c[1];
     i32 s = 0;
     while (b < 10) {
-        printf2("b: %d, s: %d \n \r \t \\ \' \" \c \x7e", b, s);
+        printf("b: %d, s: %d \n \r \t \\ \' \" \c \x7e", b, s);
         s = s + b;
         b = b + 1;
+    }
+    if b < 10 {
+        b = b + 2;
+    }
+    unless b < 10 {
+        b = b - 2;
     }
     return 1;
 }
@@ -26,18 +32,6 @@ struct my_struct {
 }
 
 i16 main() {
-    i8 a = 1;
-    i32 b = fun();
-    @(i8) d = @a;
-    
-    i32 c = b;
-
-    if c < 10 {
-        c = c + 1;
-    }
-    unless c < 10 {
-        c = c + 1;
-    }
-
+    printf("Here's a number: %d\r\n", 3);
     return 0;
 }

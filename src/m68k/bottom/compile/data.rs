@@ -204,3 +204,15 @@ pub fn compile_lea_iinstr(
     }
     Ok(())
 }
+
+pub fn compile_incsp_iinstr(
+    inc: i32,
+    _range: Range<usize>,
+    instrs: &mut Vec<ValidInstruction>,
+) -> Result<(), BudErr> {
+    let from = AddrMode::AIndDisp(inc.into(), AReg::SP);
+    let to = AReg::SP.into();
+    let instr = Lea(from, to).validate()?;
+    instrs.push(instr);
+    Ok(())
+}
