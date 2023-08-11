@@ -28,6 +28,7 @@ pub enum StackItem {
     Var(String),
     DTemp(DTemp),
     ATemp(ATemp),
+    PC,
 }
 impl StackItem {
     pub fn is_var(&self) -> bool {
@@ -38,6 +39,22 @@ impl StackItem {
     }
     pub fn is_atemp(&self) -> bool {
         matches!(self, Self::ATemp(_))
+    }
+}
+
+pub struct StackFrame {
+    pub frame_map: HashMap<StackItem, StackHeight>,
+    /// The address of the top of the top item
+    pub ceiling: StackHeight,
+    /// The amount of stack height we are responsible for (is not provided by the caller)
+    pub responsible_stack_height: StackHeight,
+}
+impl StackFrame {
+    pub fn get(&self, item: &StackItem) -> Option<&StackHeight> {
+        self.frame_map.get(item)
+    }
+    pub fn get_rsh(&self) -> StackHeight {
+        self.responsible_stack_height
     }
 }
 
@@ -140,9 +157,7 @@ pub struct FunctionEnvironment {
     smarker_map: HashMap<usize, UncalculatedStackHeight>,
     rs_map: HashMap<usize, (UncalculatedStackHeight, Option<ADBitField>)>,
     stack_height: UncalculatedStackHeight,
-    stack_frame: HashMap<StackItem, StackHeight>,
-    /// Top of the top item on the stack frame
-    ceiling: StackHeight,
+    pub stack_frame: StackFrame,
     pub label_gen: RangeFrom<usize>,
 }
 impl FunctionEnvironment {
@@ -155,7 +170,7 @@ impl FunctionEnvironment {
         label_gen: RangeFrom<usize>,
         env: &Environment,
     ) -> Result<FunctionEnvironment, CompilerErr> {
-        let (stack_frame, ceiling) =
+        let stack_frame =
             Self::generate_stack_frame(&signature, &vars, &dtemp_map, &atemp_map, env)?;
         Ok(FunctionEnvironment {
             lit_strings,
@@ -168,28 +183,33 @@ impl FunctionEnvironment {
             label_gen,
             stack_height: UncalculatedStackHeight { known: 0, reg_spaces: Vec::new(), neg_reg_spaces: Vec::new() },
             stack_frame,
-            ceiling,
         })
     }
     /// Generates the stack frame. The stack frame is organized like this:
     /// ```txt
-    /// +-----------------------------------+   higher addresses
+    ///                                         higher addresses
+    /// +-----------------------------------+  <--- ceiling
     /// |               params              |
     /// +-----------------------------------+
+    /// |                 PC                |
+    /// +-----------------------------------+  <--- responsible_stack_height
     /// |            spilled regs           |
     /// +-----------------------------------+
     /// |             local vars            |
     /// +-----------------------------------+  <--- extra_stack_height = 0
     /// |    saved regs for function call   |
-    /// +-----------------------------------+   lower addresses
+    /// +-----------------------------------+
+    ///                                         lower addresses
     /// ```
+    /// 
+    /// Returns: (Frame map, ceiling, responsible_stack_height)
     fn generate_stack_frame(
         signature: &Signature,
         vars: &[Field],
         dtemp_map: &HashMap<DTemp, Option<DReg>>,
         atemp_map: &HashMap<ATemp, Option<AReg>>,
         env: &Environment,
-    ) -> Result<(HashMap<StackItem, i32>, StackHeight), CompilerErr> {
+    ) -> Result<StackFrame, CompilerErr> {
         
         fn add_stack_height(height: &mut i32, add: i32) {
             *height += add;
@@ -201,7 +221,7 @@ impl FunctionEnvironment {
         // Build stack frame from the bottom up
         let mut stack_height: i32 = 0;
         let params = signature.args.iter().cloned().collect::<HashSet<Field>>();
-        let mut stack_frame = HashMap::new();
+        let mut frame_map = HashMap::new();
         let mut ceiling = 0;
 
         // Add local vars to stack frame
@@ -217,7 +237,7 @@ impl FunctionEnvironment {
                 }
             };
             let item = StackItem::Var(var.name.clone());
-            stack_frame.insert(item, stack_height);
+            frame_map.insert(item, stack_height);
             add_stack_height(&mut stack_height, size as i32);
             ceiling = stack_height;
         }
@@ -231,7 +251,7 @@ impl FunctionEnvironment {
             // We are just going to assume all dregs are 4 bytes, even though they could be 2 or 1
             let size = 4;
             let item = StackItem::DTemp(*dtemp);
-            stack_frame.insert(item, stack_height);
+            frame_map.insert(item, stack_height);
             add_stack_height(&mut stack_height, size as i32);
             ceiling = stack_height;
         }
@@ -241,10 +261,18 @@ impl FunctionEnvironment {
             }
             let size = 4;
             let item = StackItem::ATemp(*atemp);
-            stack_frame.insert(item, stack_height);
+            frame_map.insert(item, stack_height);
             add_stack_height(&mut stack_height, size as i32);
             ceiling = stack_height;
         }
+
+        let responsible_stack_height = stack_height;
+
+        // Add caller's PC to the stack frame
+        let item = StackItem::PC;
+        frame_map.insert(item, stack_height);
+        add_stack_height(&mut stack_height, 4);
+        ceiling = stack_height;
 
         // Add params to stack frame
         for param in &signature.args {
@@ -256,12 +284,12 @@ impl FunctionEnvironment {
                 }
             };
             let item = StackItem::Var(param.name.clone());
-            stack_frame.insert(item, stack_height);
+            frame_map.insert(item, stack_height);
             add_stack_height(&mut stack_height, size as i32);
             ceiling = stack_height;
         }
 
-        Ok((stack_frame, ceiling))
+        Ok(StackFrame { frame_map, ceiling, responsible_stack_height })
     }
     /// Returns an addressing mode that points to this var exactly as if 
     /// `place_to_addr_mode` was called. The difference is that the caller
@@ -347,6 +375,10 @@ impl FunctionEnvironment {
                     Some(stack_diff) => Ok(AddrMode::AIndDisp(self.calculate_stack_height_if_possible(&(self.stack_height.clone() + *stack_diff)), SP)),
                     None => c_err!("ATemp {} not in atemp_map or stack_frame", atemp),
                 },
+            },
+            StackItem::PC => match self.stack_frame.get(&stack_item) {
+                Some(stack_diff) => Ok(AddrMode::AIndDisp(self.calculate_stack_height_if_possible(&(self.stack_height.clone() + *stack_diff)), SP)),
+                None => c_err!("Caller's PC not stored on stack"),
             },
         }
     }
@@ -743,7 +775,7 @@ impl FunctionEnvironment {
         let mut components: HashMap<StackHeight, StackComponent<'a>> = HashMap::new();
 
         // Add stack items
-        for (item, height) in &self.stack_frame {
+        for (item, height) in &self.stack_frame.frame_map {
             components.insert(*height, StackComponent {
                 height: *height,
                 item: Some(item),
@@ -799,13 +831,11 @@ impl FunctionEnvironment {
         // Sort descending
         components.sort_by(|comp1, comp2| comp2.height.cmp(&comp1.height));
 
-        // We know that components is not empty
-        let first = components.first().unwrap();
-        let mut prev_height = self.ceiling;
+        let mut prev_height = self.stack_frame.ceiling;
 
         let horiz = "--------------------------";
         let blank = " ".repeat(horiz.len());
-        println!("+{}+ {}", horiz, self.ceiling);
+        println!("+{}+ {}", horiz, self.stack_frame.ceiling);
 
         for comp in components {
             let diff = prev_height - comp.height;
@@ -813,6 +843,7 @@ impl FunctionEnvironment {
                 Some(StackItem::ATemp(atemp)) => format!("A{}", atemp),
                 Some(StackItem::DTemp(dtemp)) => format!("D{}", dtemp),
                 Some(StackItem::Var(var)) => var.to_owned(),
+                Some(StackItem::PC) => "PC".to_owned(),
                 None => "".to_owned(),
             }, match comp.smarker {
                 Some(smarker) => format!("Smarker{}", smarker),

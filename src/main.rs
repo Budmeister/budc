@@ -321,7 +321,7 @@ fn main() {
         Err(err) => {
             println!("While saving to file: ");
             println!();
-            println!("{}", format!("    User Error: {}", err.msg).red().bold());
+            println!("{}", format!("    User Error: {}", err.get_msg()).red().bold());
         }
     }
 

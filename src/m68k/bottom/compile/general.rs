@@ -287,9 +287,9 @@ pub fn compile_iinstr(
     }
 }
 
-#[derive(Clone)]
 pub struct CompiledFunction {
     pub signature: Signature,
     pub lit_strings: Vec<(usize, String)>,
     pub instructions: Vec<ValidInstruction>,
+    pub stack_frame: StackFrame,
 }

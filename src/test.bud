@@ -32,6 +32,7 @@ struct my_struct {
 }
 
 i16 main() {
-    printf("Here's a number: %d\r\n", 3);
+    i32 num = 3;
+    printf("Here's a number: %d\r\n", num);
     return 0;
 }

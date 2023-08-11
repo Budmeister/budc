@@ -5,22 +5,27 @@
 
 use std::{fs::File, io::{BufWriter, Write}, path::Path};
 
-use crate::{error::UserErr, u_err, m68k::DataSize, bud::escape};
+use crate::{error::{UserErr, BudErr}, u_err, m68k::DataSize, bud::escape};
 
-use super::{Environment, CompiledFunction, ValidInstruction, AddrMode, ADBitField, DReg, AReg};
+use super::{Environment, CompiledFunction, ValidInstruction, AddrMode, ADBitField, DReg, AReg, StackHeight};
 
 type IOErr = std::io::Error;
 
 impl From<IOErr> for UserErr {
-    fn from(err: std::io::Error) -> UserErr {
+    fn from(err: IOErr) -> UserErr {
         UserErr { 
             msg: format!("Error while saving to file: {}", err),
             location: None,
         }
     }
 }
+impl From<IOErr> for BudErr {
+    fn from(err: IOErr) -> BudErr {
+        UserErr::from(err).into()
+    }
+}
 
-pub fn write_file(env: Environment, filepath: &str) -> Result<(), UserErr> {
+pub fn write_file(env: Environment, filepath: &str) -> Result<(), BudErr> {
     let path = Path::new(filepath);
     // Create a closure and then immediately call it so that we can use the ? operator
     let name = match (|| {
@@ -40,21 +45,22 @@ pub fn write_file(env: Environment, filepath: &str) -> Result<(), UserErr> {
     Ok(())
 }
 
-fn write_file_preamble(filename: &str, writer: &mut BufWriter<File>) -> Result<(), IOErr> {
+fn write_file_preamble(filename: &str, writer: &mut BufWriter<File>) -> Result<(), BudErr> {
     writeln!(writer, "\t.file\t\"{}\"", filename)?;
     writeln!(writer, ".text")?;
     Ok(())
 }
 
-fn write_func(func: CompiledFunction, writer: &mut BufWriter<File>) -> Result<(), IOErr> {
-    write_func_preamble(&func.signature.name.name, func.lit_strings, writer)?;
+fn write_func(func: CompiledFunction, writer: &mut BufWriter<File>) -> Result<(), BudErr> {
+    write_func_preamble(&func.signature.name.name, func.lit_strings, func.stack_frame.get_rsh(), writer)?;
     for instr in func.instructions {
         write_instr(instr, writer)?;
     }
+    write_func_postamble(func.stack_frame.get_rsh(), writer)?;
     Ok(())
 }
 
-fn write_func_preamble(name: &str, lit_strings: Vec<(usize, String)>, writer: &mut BufWriter<File>) -> Result<(), IOErr> {
+fn write_func_preamble(name: &str, lit_strings: Vec<(usize, String)>, responsible_stack_height: StackHeight, writer: &mut BufWriter<File>) -> Result<(), BudErr> {
     for (lbl, lit_string) in lit_strings {
         writeln!(writer, ".LC{}:", lbl)?;
         writeln!(writer, "\t.ascii \"{}\\0\"", escape(&lit_string))?;
@@ -63,6 +69,27 @@ fn write_func_preamble(name: &str, lit_strings: Vec<(usize, String)>, writer: &m
     writeln!(writer, "\t.even")?;
     writeln!(writer, ".globl {}", name)?;
     writeln!(writer, "{}:", name)?;
+
+    // Get responsible stack frame area
+    use super::Instruction::Lea;
+    use super::AReg::SP;
+    let from = AddrMode::AIndDisp((-responsible_stack_height).into(), SP);
+    let to = SP;
+    let instr = Lea(from, to).validate()?;
+    write_instr(instr, writer)?;
+
+    Ok(())
+}
+
+fn write_func_postamble(responsible_stack_height: StackHeight, writer: &mut BufWriter<File>) -> Result<(), BudErr> {
+    // Get responsible stack frame area
+    use super::Instruction::Lea;
+    use super::AReg::SP;
+    let from = AddrMode::AIndDisp(responsible_stack_height.into(), SP);
+    let to = SP;
+    let instr = Lea(from, to).validate()?;
+    write_instr(instr, writer)?;
+
     Ok(())
 }
 

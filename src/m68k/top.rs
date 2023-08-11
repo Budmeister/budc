@@ -773,7 +773,7 @@ impl Function {
     pub fn compile(self, label_gen: RangeFrom<usize>, log_options: &LoggingOptions, env: &Environment) -> Result<(CompiledFunction, RangeFrom<usize>), BudErr> {
         let (instrs, fienv) = get_inter_instrs(self.expr, &self.signature, label_gen, log_options, env)?;
         let (instrs, fenv) = get_instrs(instrs, &self.signature.name.name, fienv, env)?;
-        let cfunc = CompiledFunction{ signature: self.signature, instructions: instrs, lit_strings: fenv.lit_strings };
+        let cfunc = CompiledFunction { signature: self.signature, instructions: instrs, lit_strings: fenv.lit_strings, stack_frame: fenv.stack_frame };
         Ok((cfunc, fenv.label_gen))
     }
 
