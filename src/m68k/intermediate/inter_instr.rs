@@ -33,11 +33,14 @@ pub enum InterInstr {
     Chki(i16, DTemp, Range<usize>),
 
     // Stack frame operations
-    SMarker(StackMarker, Range<usize>),                       // Marks a stack location for the FunctionInterEnvironment
-    Grs(RegisterSpaceLbl, Range<usize>),                      // GetRegisterSpace - allocate space on the stack to save active regs
-    Save(RegisterSpaceLbl, Box<[ADTemp]>, Range<usize>),       // Save all active regs by moving them to the given RegisterSpace
-    Call(String, StackMarker, Range<usize>),                  // Jsr to function, then move the SP to where it was when the StackMarker
+    // SMarker(StackMarker, Range<usize>),                       // Marks a stack location for the FunctionInterEnvironment
+    // Grs(RegisterSpaceLbl, Range<usize>),                      // GetRegisterSpace - allocate space on the stack to save active regs
+    Save(Box<[ADTemp]>, Range<usize>),       // Save all active regs by moving them to the given RegisterSpace
+    // Call(String, StackMarker, Range<usize>),                  // Jsr to function, then move the SP to where it was when the StackMarker
                                                 // instruction was encountered and retrieve reg values from most recent Grs
+    Call(String, Range<usize>),
+    Load(Box<[ADTemp]>, Range<usize>),      // Pop regs from stack using movem 
+
     Lbl(usize, Range<usize>),
     Goto(usize, Range<usize>),
     Rts(Range<usize>),

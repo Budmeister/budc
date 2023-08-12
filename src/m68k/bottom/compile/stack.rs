@@ -50,6 +50,7 @@ pub fn compile_push_iinstr(from: Place, range: Range<usize>, instrs: &mut Vec<Va
                 let addr_mode = fenv.var_as_addr_mode(field.name)?;
                 if let AddrMode::AIndDisp(off, a) = addr_mode {
                     let mut size = field.tt.get_size(env, Some(&range))?;
+                    // This can still happen since size can be 1
                     if size % 2 == 1 {
                         warn!("Type {} has odd size: {}", field.tt, size);
                         size += 1;
@@ -105,6 +106,7 @@ pub fn compile_push_iinstr(from: Place, range: Range<usize>, instrs: &mut Vec<Va
             let from = (off, areg, dreg).into();
             let index = dreg.unwrap_or(Proxy1.into());
             let start_label = fenv.get_new_label();
+            let areg = Proxy1.into();
             let mut instr = vec![
                 Lea(from, areg).validate()?,
                 Move(LWord, (size as Imm).into(), index.into()).validate()?,
@@ -125,7 +127,7 @@ pub fn compile_push_iinstr(from: Place, range: Range<usize>, instrs: &mut Vec<Va
     Ok(())
 }
 
-pub fn compile_puva_iinstr(name: String, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+pub fn compile_puva_iinstr(name: String, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     // Only get the destination as AReg if it is already AReg
     let from = fenv.var_as_addr_mode(name)?;
     let instr = Pea(from).validate()?;
@@ -133,20 +135,20 @@ pub fn compile_puva_iinstr(name: String, range: Range<usize>, instrs: &mut Vec<V
     Ok(())
 }
 
-pub fn compile_pusi_iinstr(imm: Imm, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_pusi_iinstr(imm: Imm, size: DataSize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Move(size, imm.into(), AddrMode::get_push()).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_puss_iinstr(string_lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_puss_iinstr(string_lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let from = NumOrLbl::Str(string_lbl).into();
     let instr = Move(LWord, from, AddrMode::get_push()).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_pea_iinstr(atemp: ATemp, dtemp: Option<DTemp>, off: Imm, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+pub fn compile_pea_iinstr(atemp: ATemp, dtemp: Option<DTemp>, off: Imm, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     let areg = fenv.atemp_as_areg(atemp, instrs, Proxy1)?.0;
     let dreg = fenv.opt_dtemp_as_opt_dreg(dtemp, instrs, Proxy1)?
             .map(|dreg| dreg.0);
@@ -156,32 +158,34 @@ pub fn compile_pea_iinstr(atemp: ATemp, dtemp: Option<DTemp>, off: Imm, range: R
     Ok(())
 }
 
-pub fn compile_smarker_iinstr(lbl: StackMarker, fenv: &mut FunctionEnvironment) {
-    fenv.add_smarker(lbl);
-}
-
-pub fn compile_grs_iinstr(rs_lbl: RegisterSpaceLbl, fenv: &mut FunctionEnvironment) {
-    fenv.add_rs_lbl(rs_lbl);
-}
-
-pub fn compile_save_iinstr(rs_lbl: RegisterSpaceLbl, temps: &[ADTemp], range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+pub fn compile_save_iinstr(temps: &[ADTemp], _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     // Assume we save all 4 bytes of all used regs, even if not all the bytes are being used
     // This isn't necessary, but it would make the process way more complicated to think
     // about varying-sized regs
     let size = LWord;
-    let adbf = fenv.temps_to_adbitfield(temps, Some(rs_lbl))?;
-    fenv.set_rs(rs_lbl, adbf)?;
-    let to = fenv.get_rs_addr_mode(rs_lbl)?;
+    let adbf = fenv.temps_to_adbitfield(temps)?;
+
+    let rs_size = adbf.rs_size();
+    let instr = Lea(AddrMode::AIndDisp((-rs_size).into(), SP), SP).validate()?;
+    instrs.push(instr);
+
+    let to = AddrMode::AInd(SP);
     let instr = MoveMRtoM(size, adbf, to).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_call_iinstr(name: String, smarker_lbl: StackMarker, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
-    let instr = Jsr(name).validate()?;
+pub fn compile_load_iinstr(temps: &[ADTemp], range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+    let size = LWord;
+    let from = AddrMode::get_pop();
+    let adbf = fenv.temps_to_adbitfield(temps)?;
+    let instr = MoveMMtoR(size, from, adbf).validate()?;
     instrs.push(instr);
-    let smarker_addr = fenv.move_esh_to_smarker(smarker_lbl)?;
-    let instr = Lea(smarker_addr, SP).validate()?;
+    Ok(())
+}
+
+pub fn compile_call_iinstr(name: String, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+    let instr = Jsr(name).validate()?;
     instrs.push(instr);
     Ok(())
 }

@@ -41,7 +41,7 @@ pub fn get_instrs(
         env,
     )?;
 
-    let instr = Instruction::Link(-fenv.stack_frame.get_rsh() as i16, FRAME_POINTER).validate()?;
+    let instr = Instruction::Link(-fenv.stack_frame.get_rsh() as i16, FP).validate()?;
     instrs.push(instr);
 
     for iinstr in iinstrs {
@@ -49,7 +49,7 @@ pub fn get_instrs(
     }
     let mut instrs_new = Vec::new();
     for instr in instrs {
-        optimize_one(instr, &mut instrs_new, &fenv)?;
+        optimize_one(instr, &mut instrs_new)?;
     }
     let instrs = instrs_new;
 
@@ -134,13 +134,12 @@ fn get_temp_maps(
                 update_temp_usages(&mut dtemp_usages, *dtemp2);
             }
 
-            InterInstr::Call(_, _, _) => {}
-            InterInstr::SMarker(_, _) => {}
+            InterInstr::Call(_, _) => {}
             InterInstr::Lbl(_, _) => {}
+            InterInstr::Save(_, _) => {}
+            InterInstr::Load(_, _) => {}
             InterInstr::Goto(_, _) => {}
             InterInstr::Rts(_) => {}
-            InterInstr::Grs(_, _) => {}
-            InterInstr::Save(_, _, _) => {}
             InterInstr::PuVA(_, _) => {}
             InterInstr::Pusi(_, _, _) => {}
             InterInstr::Puss(_, _) => {}
@@ -268,10 +267,9 @@ pub fn compile_iinstr(
         InterInstr::Pea(atemp, dtemp, off, range) => compile_pea_iinstr(atemp, dtemp, off, range, instrs, fenv),
         InterInstr::Chk(atemp, dtemp, off, to, range) => compile_chk_iinstr(atemp, dtemp, off, to, range, instrs, fenv),
         InterInstr::Chki(len, to, range) => compile_chki_iinstr(len as Imm, to, range, instrs, fenv),
-        InterInstr::SMarker(lbl, _) => { compile_smarker_iinstr(lbl, fenv); Ok(()) },
-        InterInstr::Grs(rs_lbl, _) => { compile_grs_iinstr(rs_lbl, fenv); Ok(()) },
-        InterInstr::Save(rs_lbl, temps, range) => compile_save_iinstr(rs_lbl, &temps, range, instrs, fenv),
-        InterInstr::Call(name, smarker_lbk, range) => compile_call_iinstr(name, smarker_lbk, range, instrs, fenv),
+        InterInstr::Save(temps, range) => compile_save_iinstr(&temps, range, instrs, fenv),
+        InterInstr::Load(temps, range) => compile_load_iinstr(&temps, range, instrs, fenv),
+        InterInstr::Call(name, range) => compile_call_iinstr(name, range, instrs, fenv),
         InterInstr::Lbl(lbl, range) => compile_lbl_iinstr(lbl, range, instrs),
         InterInstr::Goto(lbl, range) => compile_goto_iinstr(lbl, range, instrs),
         InterInstr::Rts(range) => compile_rts_iinstr(range, instrs),

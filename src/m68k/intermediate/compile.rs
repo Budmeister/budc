@@ -707,17 +707,6 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
             if args.len() != offsets.len() {
                 warn!("Function signature for {} has {} arguments but {} were given", id, args.len(), offsets.len());
             }
-            // Get register space so that after the args have been pushed 
-            // to the stack, active regs can be saved before the function
-            // call
-            let rs_lbl = fienv.get_new_label();
-            let instr = InterInstr::Grs(rs_lbl, range.to_owned());
-            instrs.push(instr);
-            // Maybe I should use a separate number generator in fienv for
-            // StackMarkers, but I'm lazy
-            let marker = fienv.get_new_label();
-            let instr = InterInstr::SMarker(marker, range.to_owned());
-            instrs.push(instr);
             let mut sh: StackHeight = 0;
             for (i, offset) in offsets.into_iter().enumerate().rev() {
                 let tt = if i < args.len() {
@@ -731,11 +720,11 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
                 let plan = ReturnPlan::Push(tt);
                 compile_expr(offset, plan, instrs, fienv, env)?;
             }
-            let instr = InterInstr::Save(rs_lbl, fienv.get_active_temps(), range.to_owned());
+            let instr = InterInstr::Save(fienv.get_active_temps(), range.to_owned());
             instrs.push(instr);
-            let instr = InterInstr::Call(id.clone(), marker, range.to_owned());
+            let instr = InterInstr::Call(id.clone(), range.to_owned());
             instrs.push(instr);
-            let instr = InterInstr::IncSP(sh, range.to_owned());
+            let instr = InterInstr::Load(fienv.get_active_temps(), range.to_owned());
             instrs.push(instr);
             let place = env.ret_place(id, range)?;
             Ok(place)

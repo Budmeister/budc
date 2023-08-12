@@ -50,7 +50,7 @@ pub enum AReg {
     A3,
     A4,
     A5,
-    A6,
+    FP,
     SP,
 }
 impl std::fmt::Display for AReg {
@@ -65,7 +65,7 @@ impl std::fmt::Display for AReg {
                 AReg::A3 => "%a3",
                 AReg::A4 => "%a4",
                 AReg::A5 => "%a5",
-                AReg::A6 => "%a6",
+                AReg::FP => "%a6",
                 AReg::SP => "%sp",
             }
         )
@@ -127,7 +127,6 @@ pub enum NumOrLbl {
     NamedLbl(String),
     Lbl(usize),
     Str(usize),
-    Sum(UncalculatedStackHeight),
 }
 impl NumOrLbl {
     pub fn is_zero(&self) -> bool {
@@ -141,7 +140,6 @@ impl std::fmt::Display for NumOrLbl {
             Self::NamedLbl(lbl) => write!(f, "{}", lbl),
             Self::Lbl(lbl) => write!(f, ".L{}", lbl),
             Self::Str(lbl) => write!(f, ".LC{}", lbl),
-            Self::Sum(ush) => write!(f, "{:?}", ush),
         }
     }
 }
@@ -163,11 +161,6 @@ impl From<String> for NumOrLbl {
 impl From<usize> for NumOrLbl {
     fn from(value: usize) -> Self {
         Self::Lbl(value)
-    }
-}
-impl From<UncalculatedStackHeight> for NumOrLbl {
-    fn from(value: UncalculatedStackHeight) -> Self {
-        Self::Sum(value)
     }
 }
 
@@ -266,7 +259,6 @@ impl From<NumOrLbl> for AddrMode {
             NumOrLbl::NamedLbl(_) => Self::Imm(value),
             NumOrLbl::Lbl(_) => Self::AbsL(value),
             NumOrLbl::Str(_) => Self::Imm(value),
-            NumOrLbl::Sum(_) => Self::AIndDisp(value, AReg::SP),
         }
     }
 }
@@ -307,11 +299,11 @@ impl ADBitField {
             a3: regs.contains(&A(A3)),
             a4: regs.contains(&A(A4)),
             a5: regs.contains(&A(A5)),
-            a6: regs.contains(&A(A6)),
+            a6: regs.contains(&A(FP)),
             sp: regs.contains(&A(SP)),
         }
     }
-    pub fn rs_size(&self) -> RegisterSpaceSize {
+    pub fn rs_size(&self) -> i32 {
         let mut size = 0;
         if self.d0 { size += 4; }
         if self.d1 { size += 4; }
@@ -375,8 +367,6 @@ pub struct Valid;
 pub struct Unchecked;
 
 use Instruction::*;
-
-use super::{UncalculatedStackHeight, RegisterSpaceSize};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct ValidInstruction(Instruction);
