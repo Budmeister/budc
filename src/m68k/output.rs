@@ -7,7 +7,7 @@ use std::{fs::File, io::{BufWriter, Write}, path::Path};
 
 use crate::{error::{UserErr, BudErr}, u_err, m68k::DataSize, bud::escape};
 
-use super::{Environment, CompiledFunction, ValidInstruction, AddrMode, ADBitField, DReg, AReg, StackHeight};
+use super::{Environment, CompiledFunction, ValidInstruction, AddrMode, ADBitField, DReg, AReg};
 
 type IOErr = std::io::Error;
 
@@ -52,15 +52,14 @@ fn write_file_preamble(filename: &str, writer: &mut BufWriter<File>) -> Result<(
 }
 
 fn write_func(func: CompiledFunction, writer: &mut BufWriter<File>) -> Result<(), BudErr> {
-    write_func_preamble(&func.signature.name.name, func.lit_strings, func.stack_frame.get_rsh(), writer)?;
+    write_func_preamble(&func.signature.name.name, func.lit_strings, writer)?;
     for instr in func.instructions {
         write_instr(instr, writer)?;
     }
-    write_func_postamble(func.stack_frame.get_rsh(), writer)?;
     Ok(())
 }
 
-fn write_func_preamble(name: &str, lit_strings: Vec<(usize, String)>, responsible_stack_height: StackHeight, writer: &mut BufWriter<File>) -> Result<(), BudErr> {
+fn write_func_preamble(name: &str, lit_strings: Vec<(usize, String)>, writer: &mut BufWriter<File>) -> Result<(), BudErr> {
     for (lbl, lit_string) in lit_strings {
         writeln!(writer, ".LC{}:", lbl)?;
         writeln!(writer, "\t.ascii \"{}\\0\"", escape(&lit_string))?;
@@ -69,26 +68,6 @@ fn write_func_preamble(name: &str, lit_strings: Vec<(usize, String)>, responsibl
     writeln!(writer, "\t.even")?;
     writeln!(writer, ".globl {}", name)?;
     writeln!(writer, "{}:", name)?;
-
-    // Get responsible stack frame area
-    use super::Instruction::Lea;
-    use super::AReg::SP;
-    let from = AddrMode::AIndDisp((-responsible_stack_height).into(), SP);
-    let to = SP;
-    let instr = Lea(from, to).validate()?;
-    write_instr(instr, writer)?;
-
-    Ok(())
-}
-
-fn write_func_postamble(responsible_stack_height: StackHeight, writer: &mut BufWriter<File>) -> Result<(), BudErr> {
-    // Get responsible stack frame area
-    use super::Instruction::Lea;
-    use super::AReg::SP;
-    let from = AddrMode::AIndDisp(responsible_stack_height.into(), SP);
-    let to = SP;
-    let instr = Lea(from, to).validate()?;
-    write_instr(instr, writer)?;
 
     Ok(())
 }

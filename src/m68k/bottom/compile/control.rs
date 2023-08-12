@@ -22,6 +22,8 @@ pub fn compile_goto_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<Val
 }
 
 pub fn compile_rts_iinstr(range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+    let instr = Unlk(FRAME_POINTER).validate()?;
+    instrs.push(instr);
     let instr = Rts.validate()?;
     instrs.push(instr);
     Ok(())

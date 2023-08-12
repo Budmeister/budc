@@ -40,6 +40,10 @@ pub fn get_instrs(
         fienv.label_gen,
         env,
     )?;
+
+    let instr = Instruction::Link(-fenv.stack_frame.get_rsh() as i16, FRAME_POINTER).validate()?;
+    instrs.push(instr);
+
     for iinstr in iinstrs {
         compile_iinstr(iinstr, &mut instrs, &mut fenv, env)?;
     }
@@ -167,7 +171,7 @@ fn get_temp_maps(
     atemp_popular.sort_by(|a, b| b.0.cmp(&a.0));
 
     let dregs = [D0, D1, D2, D3, D4, D5];
-    let aregs = [A0, A1, A2, A3, A4];
+    let aregs = [A0, A1, A2, A3];
 
     let dtemp_map = Iterator::chain(
         // Make sure DTemp(0) maps to DReg::D0

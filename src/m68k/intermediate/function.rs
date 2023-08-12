@@ -43,9 +43,13 @@ pub fn get_inter_instrs(expr: Expr, signature: &Signature, label_gen: RangeFrom<
     )?;
     if !fienv.cleanup_expr_created {
         if let Some(cleanup_label) = fienv.cleanup_label {
-            let instr = InterInstr::Lbl(cleanup_label, range);
+            let instr = InterInstr::Lbl(cleanup_label, range.clone());
             instrs.push(instr);
         }
+    }
+    if signature.name.tt == Environment::get_void_tt() {
+        let instr = InterInstr::Rts(range);
+        instrs.push(instr);
     }
     // Things we need to know (from searching the function expression):
     //  * String literals

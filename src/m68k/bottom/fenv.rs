@@ -28,7 +28,8 @@ pub enum StackItem {
     Var(String),
     DTemp(DTemp),
     ATemp(ATemp),
-    PC,
+    PC, // Program Counter
+    FP, // Frame Pointer
 }
 impl StackItem {
     pub fn is_var(&self) -> bool {
@@ -192,7 +193,9 @@ impl FunctionEnvironment {
     /// |               params              |
     /// +-----------------------------------+
     /// |                 PC                |
-    /// +-----------------------------------+  <--- responsible_stack_height
+    /// +-----------------------------------+
+    /// |          old frame pointer        |
+    /// +-----------------------------------+  <--- responsible_stack_height / frame pointer (FP)
     /// |            spilled regs           |
     /// +-----------------------------------+
     /// |             local vars            |
@@ -267,6 +270,11 @@ impl FunctionEnvironment {
         }
 
         let responsible_stack_height = stack_height;
+
+        // Add caller's FP to the stack frame
+        let item = StackItem::FP;
+        frame_map.insert(item, stack_height);
+        add_stack_height(&mut stack_height, 4);
 
         // Add caller's PC to the stack frame
         let item = StackItem::PC;
@@ -376,9 +384,9 @@ impl FunctionEnvironment {
                     None => c_err!("ATemp {} not in atemp_map or stack_frame", atemp),
                 },
             },
-            StackItem::PC => match self.stack_frame.get(&stack_item) {
+            StackItem::PC | StackItem::FP => match self.stack_frame.get(&stack_item) {
                 Some(stack_diff) => Ok(AddrMode::AIndDisp(self.calculate_stack_height_if_possible(&(self.stack_height.clone() + *stack_diff)), SP)),
-                None => c_err!("Caller's PC not stored on stack"),
+                None => c_err!("Caller's {:?} not stored on stack", stack_item),
             },
         }
     }
@@ -844,6 +852,7 @@ impl FunctionEnvironment {
                 Some(StackItem::DTemp(dtemp)) => format!("D{}", dtemp),
                 Some(StackItem::Var(var)) => var.to_owned(),
                 Some(StackItem::PC) => "PC".to_owned(),
+                Some(StackItem::FP) => "FP".to_owned(),
                 None => "".to_owned(),
             }, match comp.smarker {
                 Some(smarker) => format!("Smarker{}", smarker),
@@ -882,6 +891,8 @@ impl FunctionEnvironment {
 
 pub type StackMarker = usize;
 
+pub const FRAME_POINTER: AReg = AReg::A6;
+
 #[derive(Copy, Clone)]
 pub enum Proxy {
     Proxy1,
@@ -890,8 +901,8 @@ pub enum Proxy {
 impl Proxy {
     pub const DATA_PROXY1: DReg = DReg::D6;
     pub const DATA_PROXY2: DReg = DReg::D7;
-    pub const ADDR_PROXY1: AReg = AReg::A5;
-    pub const ADDR_PROXY2: AReg = AReg::A6;
+    pub const ADDR_PROXY1: AReg = AReg::A4;
+    pub const ADDR_PROXY2: AReg = AReg::A5;
 }
 impl From<Proxy> for DReg {
     fn from(val: Proxy) -> Self {
