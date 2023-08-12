@@ -11,7 +11,7 @@
 //! Author:     Brian Smith
 //! Year:       2023
 
-use std::{collections::{HashMap, HashSet}, ops::{RangeFrom, Sub, Add, Range}};
+use std::{collections::{HashMap, HashSet}, ops::{RangeFrom, Range}};
 
 use Proxy::*;
 use log::{error, debug};
@@ -21,7 +21,7 @@ use crate::{m68k::*, c_err, error::*};
 use super::instruction::*;
 
 use ADReg::*;
-use AReg::SP;
+
 use AReg::FP;
 
 #[derive(Hash, Clone, Eq, PartialEq, Debug)]
@@ -144,7 +144,7 @@ impl FunctionEnvironment {
         let mut stack_height: StackHeight = 0;
         let params = signature.args.iter().cloned().collect::<HashSet<Field>>();
         let mut frame_map = HashMap::new();
-        let mut ceiling = 0;
+        let mut ceiling;
 
         // Add caller's FP to the stack frame
         let item = StackItem::FP;
@@ -262,7 +262,7 @@ impl FunctionEnvironment {
                     None => self.stack_item_to_addr_mode(&StackItem::DTemp(dtemp)),
                 }
             }
-            Place::Ref(atemp, dtemp, off, tt) => {
+            Place::Ref(atemp, dtemp, off, _tt) => {
                 // What do we do with tt?
                 let (areg, _) = self.atemp_as_areg(atemp, instrs, n)?;
                 match dtemp {
@@ -396,7 +396,7 @@ impl FunctionEnvironment {
                 instrs.push(instr);
                 Ok((proxy, false))
             }
-            Place::DTemp(dtemp, tt) => {
+            Place::DTemp(dtemp, _tt) => {
                 // What do we do with tt?
                 self.dtemp_as_dreg(dtemp, instrs, n)
             }

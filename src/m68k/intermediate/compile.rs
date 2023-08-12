@@ -707,7 +707,6 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
             if args.len() != offsets.len() {
                 warn!("Function signature for {} has {} arguments but {} were given", id, args.len(), offsets.len());
             }
-            let mut sh: StackHeight = 0;
             for (i, offset) in offsets.into_iter().enumerate().rev() {
                 let tt = if i < args.len() {
                     args[i].tt.clone()
@@ -716,7 +715,6 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
                     warn!("Type used for {}th argument: {}", i, tt);
                     tt
                 };
-                sh += tt.get_size(env, Some(&range))? as StackHeight;
                 let plan = ReturnPlan::Push(tt);
                 compile_expr(offset, plan, instrs, fienv, env)?;
             }

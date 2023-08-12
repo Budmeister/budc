@@ -25,7 +25,7 @@ pub fn compile_tst_iinstr(from: Place, range: Range<usize>, instrs: &mut Vec<Val
     Ok(())
 }
 
-pub fn compile_tsti_iinstr(from: Imm, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_tsti_iinstr(from: Imm, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     const _X: u8 = 0x10;
     const N: u8 = 0x8;
     const Z: u8 = 0x4;
@@ -52,67 +52,67 @@ pub fn compile_tsti_iinstr(from: Imm, range: Range<usize>, instrs: &mut Vec<Vali
     Ok(())
 }
 
-pub fn compile_bcc_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_bcc_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Bcc(lbl).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_bcs_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_bcs_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Bcs(lbl).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_beq_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_beq_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Beq(lbl).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_bge_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_bge_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Bge(lbl).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_bgt_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_bgt_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Bgt(lbl).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_ble_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_ble_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Ble(lbl).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_blt_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_blt_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Blt(lbl).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_bmi_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_bmi_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Bmi(lbl).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_bne_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_bne_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Bne(lbl).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_bpl_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_bpl_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Bpl(lbl).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-pub fn compile_bra_iinstr(lbl: usize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
+pub fn compile_bra_iinstr(lbl: usize, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>) -> Result<(), BudErr> {
     let instr = Bra(lbl).validate()?;
     instrs.push(instr);
     Ok(())

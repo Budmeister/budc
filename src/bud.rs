@@ -948,13 +948,13 @@ impl BinExpr {
             }, Node::NonTm {
                 n: N::BinaryExpr,
                 children: be,
-                range: range2,
+                range: _range2,
             }] => {
                 let b;
                 match &b_children[..] {
                     [Node::Tm {
                         t: b_t,
-                        range: rangeb,
+                        range: _rangeb,
                     }] => {
                         b = b_t.clone();
                     }
@@ -1865,7 +1865,7 @@ impl TypeExpr {
             }, Node::NonTm {
                 n: N::Sqr,
                 children: sqr2,
-                range: range2,
+                range: _range2,
             }] => {
                 let expr = Expr::new(expr, range1.to_owned())?;
                 let length = Into::<Result<i32, BudErr>>::into(expr)?;

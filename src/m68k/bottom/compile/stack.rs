@@ -175,7 +175,7 @@ pub fn compile_save_iinstr(temps: &[ADTemp], _range: Range<usize>, instrs: &mut 
     Ok(())
 }
 
-pub fn compile_load_iinstr(temps: &[ADTemp], range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+pub fn compile_load_iinstr(temps: &[ADTemp], _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     let size = LWord;
     let from = AddrMode::get_pop();
     let adbf = fenv.temps_to_adbitfield(temps)?;
@@ -184,7 +184,7 @@ pub fn compile_load_iinstr(temps: &[ADTemp], range: Range<usize>, instrs: &mut V
     Ok(())
 }
 
-pub fn compile_call_iinstr(name: String, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+pub fn compile_call_iinstr(name: String, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, _fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     let instr = Jsr(name).validate()?;
     instrs.push(instr);
     Ok(())
