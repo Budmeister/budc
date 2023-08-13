@@ -222,13 +222,22 @@ impl FunctionEnvironment {
     /// does not need to know the type
     /// 
     /// This function is intended for finding the address of a variable and
-    /// loading it using `Lea`. The returned AddrMode will always be
-    /// AIndDisp and will therefore be a valid source for `Lea`
+    /// loading it using `Lea`. If the variable is a local variable, then the
+    /// returned AddrMode will always be AIndDisp. If it is a global variable,
+    /// then the returned AddrMode will be AbsL. Both are a valid source for 
+    /// `Lea`. 
     pub fn var_as_addr_mode(
         &self,
         name: String,
+        env: &Environment,
     ) -> Result<AddrMode, CompilerErr> {
-        self.stack_item_to_addr_mode(&StackItem::Var(name))
+        if let Ok(addr_mode) = self.stack_item_to_addr_mode(&StackItem::Var(name.clone())) {
+            return Ok(addr_mode);
+        }
+        if let Some(_) = env.get_global_var(&name) {
+            return Ok(AddrMode::AbsL(NumOrLbl::NamedLbl(name)));
+        }
+        return c_err!("Variable not found: {}", name);
     }
     /// Returns an addressing mode that points to the given place.
     ///
@@ -241,10 +250,11 @@ impl FunctionEnvironment {
         place: Place,
         range: Range<usize>,
         instrs: &mut Vec<ValidInstruction>,
+        env: &Environment,
         n: Proxy,
     ) -> Result<AddrMode, CompilerErr> {
         match place {
-            Place::Var(name) => self.var_as_addr_mode(name.name),
+            Place::Var(name) => self.var_as_addr_mode(name.name, env),
             Place::ATemp(atemp) => match self.atemp_map.get(&atemp).unwrap() {
                 Some(areg) => Ok(AddrMode::A(*areg)),
                 None => Ok(self.stack_item_to_addr_mode(&StackItem::ATemp(atemp))?),
@@ -381,7 +391,7 @@ impl FunctionEnvironment {
                 }
                 let proxy: DReg = n.into();
                 let size = name.tt.get_data_size(env, Some(&range))?.unwrap();
-                let from = self.stack_item_to_addr_mode(&StackItem::Var(name.name))?;
+                let from = self.var_as_addr_mode(name.name, env)?;
                 let to = proxy.into();
                 let instr = Instruction::Move(size, from, to).validate()?;
                 instrs.push(instr);
@@ -441,7 +451,7 @@ impl FunctionEnvironment {
                 }
                 let proxy: AReg = n.into();
                 let size = name.tt.get_data_size(env, Some(&range))?.unwrap();
-                let from = self.stack_item_to_addr_mode(&StackItem::Var(name.name))?;
+                let from = self.var_as_addr_mode(name.name, env)?;
                 let to = proxy.into();
                 let instr = Instruction::Move(size, from, to).validate()?;
                 instrs.push(instr);

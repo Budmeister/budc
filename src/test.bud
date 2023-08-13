@@ -1,7 +1,11 @@
 
-void printf(@(i8) str) {
-    i32 a = 0;
-}
+extern void printf(@(i8) str);
+
+i32 global_num;
+extern i32 extern_num;
+i32[4] arr1;
+i8[3] arr2;
+i8[3][12] arr3;
 
 void printf2(@(i8) str, i32 num1, i32 num2, i32 num3) {
     printf(str, num1, num2, num3);
@@ -35,9 +39,15 @@ struct my_struct {
     i32 hello
 }
 
+void set_global_num() {
+    global_num = @global_num;
+}
+
 i16 main() {
-    i32 num1 = 3;
+    set_global_num();
+    i32 num1 = global_num;
     i32 num2 = 4;
     printf2("The sum of %d and %d is %d\r\n", num1, num2, num1 + num2);
+    printf("Address of global_num: %p\r\n", @global_num);
     return 0;
 }

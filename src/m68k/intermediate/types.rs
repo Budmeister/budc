@@ -31,8 +31,10 @@ impl Expr {
 
 impl BinExpr {
     pub fn type_preference(&self, fienv: &FunctionInterEnvironment, env: &Environment) -> Result<TypeType, UserErr> {
-        let (BinExpr::Binary(nbe, _, _, _) | BinExpr::NonBin(nbe, _)) = self;
-        nbe.type_preference(fienv, env)
+        match self {
+            BinExpr::Binary(be, _, _, _) => be.type_preference(fienv, env),
+            BinExpr::NonBin(nbe, _) => nbe.type_preference(fienv, env),
+        }
     }
 }
 
@@ -45,6 +47,14 @@ impl NonBinExpr {
                     None => Ok(Environment::get_void_tt()),
                 }
             },
+            NonBinExpr::ArrExpr(exprs, _) => {
+                let len = exprs.len();
+                let tt = match exprs.first() {
+                    Some(expr) => expr.type_preference(fienv, env)?,
+                    None => Environment::get_void_tt(),
+                };
+                Ok(Environment::get_arr_tt(tt, len as i32))
+            }
             NonBinExpr::AssignExpr(id, _, _) => IdExpr::id_to_tt(IdExpr::clone(id), fienv, env),
             NonBinExpr::VarDeclAssgn(vd, _, _) => {
                 let field = Field::new(VarDecl::clone(vd), env);
@@ -65,6 +75,7 @@ impl NonBinExpr {
             NonBinExpr::DoWhile(_, expr, _) => expr.type_preference(fienv, env),
             NonBinExpr::Break(_) => Ok(Environment::get_void_tt()),
             NonBinExpr::Continue(_) => Ok(Environment::get_void_tt()),
+            NonBinExpr::Empty(_) => Ok(Environment::get_void_tt()),
         }
     }
 
@@ -96,11 +107,13 @@ impl IdExpr {
                 match tt {
                     TypeType::Pointer(tt) => Ok(*tt),
                     TypeType::Id(name) => {
-                        let field = fienv.get_var(&name);
-                        match field {
-                            Some(Field { tt , name: _ }) => Ok(tt),
-                            _ => u_err!(range, "Unknown id {}", name)
+                        if let Some(Field { tt, name: _ }) = fienv.get_var(&name) {
+                            return Ok(tt.clone());
                         }
+                        if let Some(GlobalVar { name: Field { tt, name: _}, data: _ }) = env.get_global_var(&name) {
+                            return Ok(tt.clone());
+                        }
+                        return u_err!(range, "Unknown id {}", name);
                     }
                     TypeType::Array(_, _) => u_err!(range, "Cannot dereference array"),
                     TypeType::Struct(name, _) => u_err!(range, "Cannot dereference struct {}", name),
@@ -108,10 +121,12 @@ impl IdExpr {
             }
             IdExpr::Id(name, range) => {
                 if let Some(Field { tt, name: _ }) = fienv.get_var(&name) {
-                    Ok(tt)
-                } else {
-                    u_err!(range, "Unknown id {}", name)
+                    return Ok(tt.clone());
                 }
+                if let Some(GlobalVar { name: Field { tt, name: _}, data: _ }) = env.get_global_var(&name) {
+                    return Ok(tt.clone());
+                }
+                return u_err!(range, "Unknown id {}", name);
             }
         }
     }
@@ -138,6 +153,9 @@ impl Environment {
     }
     pub fn get_void_tt() -> TypeType {
         TypeType::Id("void".to_owned())
+    }
+    pub fn get_arr_tt(tt: TypeType, len: i32) -> TypeType {
+        TypeType::Array(Box::new(tt), len)
     }
 
 }
@@ -178,6 +196,13 @@ impl TypeType {
     }
     pub fn is_array(&self) -> bool {
         matches!(self, TypeType::Array(_, _))
+    }
+    pub fn get_array_len(&self) -> Option<i32> {
+        if let TypeType::Array(_, len) = self {
+            Some(*len)
+        } else {
+            None
+        }
     }
     pub fn is_id(&self) -> bool {
         matches!(self, TypeType::Id(_))

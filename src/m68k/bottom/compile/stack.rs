@@ -22,20 +22,20 @@ pub fn compile_mova_iinstr(name: String, to: Place, range: Range<usize>, instrs:
     } else {
         (Proxy1.into(), false)
     };
-    let from = fenv.var_as_addr_mode(name)?;
+    let from = fenv.var_as_addr_mode(name, env)?;
     let instr = Lea(from, to_areg).validate()?;
     instrs.push(instr);
     if !live {
-        let to = fenv.place_to_addr_mode(to, range, instrs, Proxy2)?;
+        let to = fenv.place_to_addr_mode(to, range, instrs, env, Proxy2)?;
         let instr = Move(LWord, to_areg.into(), to).validate()?;
         instrs.push(instr);
     }
     Ok(())
 }
 
-pub fn compile_movs_iinstr(string_lbl: usize, to: Place, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+pub fn compile_movs_iinstr(string_lbl: usize, to: Place, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
     let from = NumOrLbl::Str(string_lbl).into();
-    let to = fenv.place_to_addr_mode(to, range, instrs, Proxy1)?;
+    let to = fenv.place_to_addr_mode(to, range, instrs, env, Proxy1)?;
     let instr = Move(LWord, from, to).validate()?;
     instrs.push(instr);
     Ok(())
@@ -47,7 +47,7 @@ pub fn compile_push_iinstr(from: Place, range: Range<usize>, instrs: &mut Vec<Va
     match from {
         Place::Var(field) => {
             if field.tt.is_array() || field.tt.is_struct() {
-                let addr_mode = fenv.var_as_addr_mode(field.name)?;
+                let addr_mode = fenv.var_as_addr_mode(field.name, env)?;
                 if let AddrMode::AIndDisp(off, a) = addr_mode {
                     let mut size = field.tt.get_size(env, Some(&range))?;
                     // This can still happen since size can be 1
@@ -64,7 +64,7 @@ pub fn compile_push_iinstr(from: Place, range: Range<usize>, instrs: &mut Vec<Va
             } else {
                 // magic or pointer
                 from_addr_mode = That((
-                    fenv.var_as_addr_mode(field.name)?,
+                    fenv.var_as_addr_mode(field.name, env)?,
                     field.tt.get_data_size(env, Some(&range))?.unwrap()
                 ));
             }
@@ -127,9 +127,9 @@ pub fn compile_push_iinstr(from: Place, range: Range<usize>, instrs: &mut Vec<Va
     Ok(())
 }
 
-pub fn compile_puva_iinstr(name: String, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+pub fn compile_puva_iinstr(name: String, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
     // Only get the destination as AReg if it is already AReg
-    let from = fenv.var_as_addr_mode(name)?;
+    let from = fenv.var_as_addr_mode(name, env)?;
     let instr = Pea(from).validate()?;
     instrs.push(instr);
     Ok(())

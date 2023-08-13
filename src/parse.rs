@@ -81,12 +81,13 @@ where
                     children.push(node);
                 } else {
                     return c_err!(
+                        slice_location,
                         "Mismatched stacks! Needed more children, but node_stack was empty!"
                     );
                 }
             }
             children.reverse();
-            let node = Node::NonTm{ n: n.clone(), children, range: slice_location };
+            let node = Node::NonTm{ n: n.clone(), children, range: slice_location.clone() };
             node_stack.push(node);
             // Goto new state
             state_num = *state_stack.last().unwrap();
@@ -100,6 +101,7 @@ where
                 }
                 None => {
                     return c_err!(
+                        slice_location,
                         "No goto available for {} in state {}. Quitting.",
                         n, state_num
                     );
@@ -126,7 +128,7 @@ where
             let mut first_shift = None;
             let mut first_reduce = None;
             if actions.len() < 2 {
-                return c_err!("Invalid action - Multi-action with less than two actions: {:?}, in state {}:", actions, state_num);
+                return c_err!(slice_location, "Invalid action - Multi-action with less than two actions: {:?}, in state {}:", actions, state_num);
             }
             for action in actions {
                 match action {
@@ -141,7 +143,7 @@ where
                         }
                     }
                     Action::Multi(_) => {
-                        return c_err!("Invalid action - Multi-action containing multi-actions: {:?}, in state {}", actions, state_num);
+                        return c_err!(slice_location, "Invalid action - Multi-action containing multi-actions: {:?}, in state {}", actions, state_num);
                     }
                 }
             }
@@ -157,7 +159,7 @@ where
                     tok.to_string().blue(), state_num, actions, action
                 );
             } else {
-                return c_err!("Did not find a valid action in Multi-action: {:?}", actions);
+                return c_err!(slice_location, "Did not find a valid action in Multi-action: {:?}", actions);
             }
             do_action(
                 log_options,
@@ -175,6 +177,7 @@ where
         None => {
             let options = &states[*state_stack.last().unwrap()].next.keys();
             return u_err!(
+                slice_location,
                 "Syntax Error on token {} at location {} (state {}). Expected: {:?}",
                 tok.to_string().blue(), slice_location.start, state_num.to_string().red(), options
             );

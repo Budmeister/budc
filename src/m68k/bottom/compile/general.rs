@@ -257,11 +257,11 @@ pub fn compile_iinstr(
         InterInstr::Move(from, to, range) => compile_move_iinstr(from, to, range, instrs, fenv, env),
         InterInstr::MoVA(name, to, range) => compile_mova_iinstr(name, to, range, instrs, fenv, env),
         InterInstr::Movi(imm, to, range) => compile_movi_iinstr(imm, to, range, instrs, fenv, env),
-        InterInstr::Movs(string_lbl, to, range) => compile_movs_iinstr(string_lbl, to, range, instrs, fenv),
-        InterInstr::Lea(atemp, dtemp, off, to, range) => compile_lea_iinstr(atemp, dtemp, off, to, range, instrs, fenv),
+        InterInstr::Movs(string_lbl, to, range) => compile_movs_iinstr(string_lbl, to, range, instrs, fenv, env),
+        InterInstr::Lea(atemp, dtemp, off, to, range) => compile_lea_iinstr(atemp, dtemp, off, to, range, instrs, fenv, env),
         InterInstr::IncSP(inc, range) => compile_incsp_iinstr(inc, range, instrs),
         InterInstr::Push(from, range) => compile_push_iinstr(from, range, instrs, fenv, env),
-        InterInstr::PuVA(name, range) => compile_puva_iinstr(name, range, instrs, fenv),
+        InterInstr::PuVA(name, range) => compile_puva_iinstr(name, range, instrs, fenv, env),
         InterInstr::Pusi(imm, size, range) => compile_pusi_iinstr(imm, size, range, instrs),
         InterInstr::Puss(string_lbl, range) => compile_puss_iinstr(string_lbl, range, instrs),
         InterInstr::Pea(atemp, dtemp, off, range) => compile_pea_iinstr(atemp, dtemp, off, range, instrs, fenv),
@@ -289,9 +289,16 @@ pub fn compile_iinstr(
     }
 }
 
+pub enum CompiledFuncData {
+    Local {
+        lit_strings: Vec<(usize, String)>,
+        instructions: Vec<ValidInstruction>,
+        stack_frame: StackFrame,
+    },
+    Extern
+}
+
 pub struct CompiledFunction {
     pub signature: Signature,
-    pub lit_strings: Vec<(usize, String)>,
-    pub instructions: Vec<ValidInstruction>,
-    pub stack_frame: StackFrame,
+    pub data: CompiledFuncData,
 }

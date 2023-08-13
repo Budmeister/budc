@@ -7,8 +7,8 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::RangeFrom;
 
-use crate::bud::{BinExpr, Expr, NonBinExpr, TypeExpr, VarDecl};
-use crate::error::*;
+use crate::bud::{BinExpr, Expr, NonBinExpr, TypeExpr, VarDecl, Item};
+use crate::{error::*, u_erru, c_erru};
 use crate::logging::LoggingOptions;
 use crate::tools::ToStringCollection;
 use crate::{u_err, c_err};
@@ -84,9 +84,9 @@ impl BudExpander {
         built_in: &HashMap<TypeType, Type>,
     ) -> Result<(), UserErr> {
         match &*expr.bin_expr {
-            BinExpr::Binary(nbe, _, be, _) => {
-                Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in)?;
-                Self::get_types_in_binexpr(be, types, struct_names, built_in)
+            BinExpr::Binary(be, _, nbe, _) => {
+                Self::get_types_in_binexpr(be, types, struct_names, built_in)?;
+                Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in)
             }
             BinExpr::NonBin(nbe, _) => {
                 Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in)
@@ -101,7 +101,7 @@ impl BudExpander {
         built_in: &HashMap<TypeType, Type>,
     ) -> Result<(), UserErr> {
         match be {
-            BinExpr::Binary(nbe, _, be, _) => {
+            BinExpr::Binary(be, _, nbe, _) => {
                 Self::get_types_in_nonbinexpr(nbe, types, struct_names, built_in)?;
                 Self::get_types_in_binexpr(be, types, struct_names, built_in)
             }
@@ -119,6 +119,9 @@ impl BudExpander {
     ) -> Result<(), UserErr> {
         match nbe {
             NonBinExpr::BlockExpr(exprs, _) => exprs
+                .iter()
+                .try_for_each(|expr| Self::get_types_in_expr(expr, types, struct_names, built_in)),
+            NonBinExpr::ArrExpr(exprs, _) => exprs
                 .iter()
                 .try_for_each(|expr| Self::get_types_in_expr(expr, types, struct_names, built_in)),
             NonBinExpr::AssignExpr(_, expr, _) => {
@@ -175,11 +178,12 @@ impl BudExpander {
             },
             NonBinExpr::Break(_) => Ok(()),
             NonBinExpr::Continue(_) => Ok(()),
+            NonBinExpr::Empty(_) => Ok(()),
         }
     }
 
     pub fn get_types_in_funcs(
-        funcs: &Vec<(VarDecl, Vec<VarDecl>, Box<Expr>)>,
+        funcs: &Vec<(VarDecl, Vec<VarDecl>, Option<Box<Expr>>)>,
         struct_names: &HashSet<String>,
         built_in: &HashMap<TypeType, Type>,
     ) -> Result<HashSet<TypeType>, UserErr> {
@@ -188,7 +192,21 @@ impl BudExpander {
             for arg in args {
                 TypeType::from_te(arg.typ.clone(), struct_names, built_in)?.add_subtypes(&mut types);
             }
-            Self::get_types_in_expr(expr, &mut types, struct_names, built_in)?;
+            if let Some(expr) = expr {
+                Self::get_types_in_expr(expr, &mut types, struct_names, built_in)?;
+            }
+        }
+        Ok(types)
+    }
+
+    pub fn get_types_in_globals(
+        globals: &Vec<(VarDecl, GlobalVarData)>,
+        struct_names: &HashSet<String>,
+        built_in: &HashMap<TypeType, Type>,
+    ) -> Result<HashSet<TypeType>, UserErr> {
+        let mut types = HashSet::new();
+        for (name, _) in globals {
+            TypeType::from_te(name.typ.clone(), struct_names, built_in)?.add_subtypes(&mut types);
         }
         Ok(types)
     }
@@ -203,6 +221,9 @@ impl BudExpander {
                 vec![(value, None)]
             }
         }
+
+        let mut errors = Vec::new();
+
         // Get Items
         let children;
         let range;
@@ -224,23 +245,87 @@ impl BudExpander {
         let mut func_names = Vec::new();
         let mut structs = Vec::new();
         let mut imports = Vec::new();
+        let mut globals = Vec::new();
 
-        for item in items {
-            match item {
-                bud::Item::FuncDecl(name, args, expr, _) => {
-                    func_names.push(name.id.clone());
-                    funcs.push((name, args, expr));
+        // Sort out the extern items from the local items
+        let mut externs = Vec::new();
+        let locals: Vec<_> = items
+            .into_iter()
+            .filter_map(|item| {
+                match item {
+                    Item::ExternFunc(_, _, ref range) |
+                    Item::ExternBlock(_, ref range) => {
+                        errors.push((u_erru!(range, "Extern items should use the extern keyword"), None));
+                        externs.push(item);
+                        None
+                    }
+                    Item::ExternItem(item, _) => {
+                        externs.push(*item);
+                        None
+                    }
+                    _ => {
+                        Some(item)
+                    }
                 }
-                bud::Item::StructDecl(name, fields, _) => {
+            })
+            .collect();
+
+        for item in externs {
+            match item {
+                Item::FuncDecl(name, _, _, range) => {
+                    errors.push((u_erru!(range, "Extern functions should not have a body"), Some(name.id)))
+                },
+                Item::StructDecl(name, _, range) => {
+                    errors.push((c_erru!(range, "Even extern structs should have been handled in the local section of the code"), Some(name)))
+                },
+                Item::ImportDecl(_, range) => {
+                    errors.push((u_erru!(range, "Import statements should not be extern"), None));
+                },
+                Item::VarDecl(vd, _) => {
+                    globals.push((vd, GlobalVarData::Extern));
+                },
+                Item::ExternFunc(name, args, _) => {
+                    funcs.push((name, args, None));
+                },
+                Item::ExternBlock(_, range) => {
+                    errors.push((u_erru!(range, "Extern blocks should not be nested"), None));
+                },
+                Item::ExternItem(_, range) => {
+                    errors.push((u_erru!(range, "Only one extern indicator is needed"), None));
+                },
+            }
+        }
+
+        for item in locals {
+            match item {
+                Item::FuncDecl(name, args, expr, _) => {
+                    func_names.push(name.id.clone());
+                    funcs.push((name, args, Some(expr)));
+                }
+                Item::StructDecl(name, fields, _) => {
                     structs.push((name, fields));
                 }
-                bud::Item::ImportDecl(path, _) => imports.push(path),
+                Item::ImportDecl(path, _) => {
+                    imports.push(path);
+                }
+                Item::VarDecl(vd, _) => {
+                    globals.push((vd, GlobalVarData::Local));
+                }
+                Item::ExternFunc(name, _, range) => {
+                    errors.push((c_erru!(range, "Extern function {} was not added to the extern list", &name.id), Some(name.id)));
+                }
+                Item::ExternBlock(_, range) => {
+                    errors.push((c_erru!(range, "Extern block was not added to the extern list"), None));
+                }
+                Item::ExternItem(_, range) => {
+                    errors.push((c_erru!(range, "Extern item was not added to the extern list"), None));
+                }
             }
         }
 
         // Find all used types and size them
         let built_in = Self::get_built_in_types();
-        let (mut environment, funcs) = Environment::new(log_options, structs, built_in, funcs)?;
+        let (mut environment, funcs) = Environment::new(log_options, structs, built_in, funcs, globals)?;
         
         if log_options.print_types {
             debug!("Types found: ");
@@ -256,7 +341,6 @@ impl BudExpander {
         }
 
         // Compile all funcs
-        let mut errors = Vec::new();
         let mut label_gen = Some(0..);
         for (name, func) in funcs {
             match func.compile(label_gen.unwrap_or_else(|| 0..), log_options, &environment) {
@@ -428,6 +512,7 @@ pub struct Environment {
     pub types: HashMap<TypeType, Type>,             // Give me a TypeType, and I'll give you a Type
     pub structs: HashMap<String, TypeType>,         // Give me a struct name, and I'll give you the TypeType for that struct
     pub global_funcs: HashMap<String, Signature>,   // Give me a funciton name, and I'll give you the signature
+    pub global_vars: HashMap<String, GlobalVar>,
     pub compiled_funcs: Vec<CompiledFunction>,
 }
 impl Environment {
@@ -437,7 +522,8 @@ impl Environment {
         log_options: &LoggingOptions,
         structs: Vec<(String, Vec<VarDecl>)>,
         mut built_in: HashMap<TypeType, Type>,
-        funcs: Vec<(VarDecl, Vec<VarDecl>, Box<Expr>)>,
+        funcs: Vec<(VarDecl, Vec<VarDecl>, Option<Box<Expr>>)>,
+        globals: Vec<(VarDecl, GlobalVarData)>,
     ) -> Result<(Environment, Vec<(String, Function)>), BudErr> {
         if log_options.print_types_trace {
             debug!("Types:");
@@ -475,10 +561,13 @@ impl Environment {
 
         let types_in_functions: HashSet<TypeType> =
             BudExpander::get_types_in_funcs(&funcs, &struct_names, &built_in)?;
+        let types_in_globals: HashSet<TypeType> =
+            BudExpander::get_types_in_globals(&globals, &struct_names, &built_in)?;
         if log_options.print_types_trace {
             debug!("Struct types: {}", typetypes.to_string());
             debug!("Built-in types: {}", crate::tools::to_string(&built_in));
             debug!("Types in functions: {}", &types_in_functions.to_string());
+            debug!("Types in globals: {}", &types_in_globals.to_string());
         }
         // Generate the sizes of all types
         // structs, built-ins, and types used in functions
@@ -491,8 +580,14 @@ impl Environment {
             .chain(
                 types_in_functions
                     .into_iter()
-                    .filter(|typtyp| !built_in.contains_key(typtyp))
-                    .map(|typtyp| (typtyp.clone(), TypeSizeGenerator::new(typtyp))),
+                    .filter(|tt| !built_in.contains_key(tt))
+                    .map(|tt| (tt.clone(), TypeSizeGenerator::new(tt))),
+            )
+            .chain(
+                types_in_globals
+                    .into_iter()
+                    .filter(|tt| !built_in.contains_key(tt))
+                    .map(|tt| (tt.clone(), TypeSizeGenerator::new(tt))),
             )
             .collect::<HashMap<TypeType, TypeSizeGenerator>>();
         if log_options.print_types_trace {
@@ -545,18 +640,34 @@ impl Environment {
                 structs.insert(name.to_owned(), tt.to_owned());
             }
         }
-        let mut env = Environment { types, structs, global_funcs: HashMap::new(), compiled_funcs: Vec::new() };
+        let mut env = Environment {
+            types,
+            structs,
+            global_funcs: HashMap::new(),
+            global_vars: HashMap::new(),
+            compiled_funcs: Vec::new(),
+        };
         let funcs: Vec<(String, Function)> = funcs
             .into_iter()
             .map(|(name, args, expr)| {
                 (
                     name.id.to_owned(),
-                    Function::new(name, args, *expr, &env)
+                    Function::new(name, args, expr.map(|e| *e), &env)
                 )
             })
             .collect();
         for (name, func) in &funcs {
             env.global_funcs.insert(name.clone(), func.signature.clone());
+        }
+        for (vd, data) in globals {
+            let range = vd.range.clone();
+            let name = Field::new(vd, &env);
+            if env.global_vars.contains_key(&name.name) {
+                return u_err!(range, "Global variable {} already defined", name.name);
+            }
+            let id = name.name.clone();
+            let global = GlobalVar { name, data };
+            env.global_vars.insert(id, global);
         }
 
         if log_options.print_types_trace {
@@ -588,6 +699,10 @@ impl Environment {
         } else {
             Ok(())
         }
+    }
+
+    pub fn get_global_var(&self, name: &str) -> Option<&GlobalVar> {
+        self.global_vars.get(name)
     }
 }
 
@@ -751,13 +866,38 @@ pub struct Signature {
     pub args: Vec<Field>,
 }
 
+#[derive(Debug, Clone)]
+pub enum FuncData {
+    Local(Expr),
+    Extern,
+}
+impl From<Option<Expr>> for FuncData {
+    fn from(value: Option<Expr>) -> Self {
+        match value {
+            Some(expr) => Self::Local(expr),
+            None => Self::Extern,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum GlobalVarData {
+    Local,
+    Extern,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GlobalVar {
+    pub name: Field,
+    pub data: GlobalVarData,
+}
+
 #[derive(Clone)]
 pub struct Function {
     pub signature: Signature,
-    pub expr: Expr,
+    pub expr: FuncData,
 }
 impl Function {
-    pub fn new(name: VarDecl, args: Vec<VarDecl>, expr: Expr, environment: &Environment) -> Function {
+    pub fn new(name: VarDecl, args: Vec<VarDecl>, expr: Option<Expr>, environment: &Environment) -> Function {
         let name = Field::new(name, environment);
         let args = args
             .into_iter()
@@ -767,14 +907,20 @@ impl Function {
             .collect();
         Function {
             signature: Signature { name, args },
-            expr,
+            expr: expr.into(),
         }
     }
     pub fn compile(self, label_gen: RangeFrom<usize>, log_options: &LoggingOptions, env: &Environment) -> Result<(CompiledFunction, RangeFrom<usize>), BudErr> {
-        let (instrs, fienv) = get_inter_instrs(self.expr, &self.signature, label_gen, log_options, env)?;
-        let (instrs, fenv) = get_instrs(instrs, &self.signature.name.name, fienv, env)?;
-        let cfunc = CompiledFunction { signature: self.signature, instructions: instrs, lit_strings: fenv.lit_strings, stack_frame: fenv.stack_frame };
-        Ok((cfunc, fenv.label_gen))
+        match self.expr {
+            FuncData::Local(expr) => {
+                let (instrs, fienv) = get_inter_instrs(expr, &self.signature, label_gen, log_options, env)?;
+                let (instrs, fenv) = get_instrs(instrs, &self.signature.name.name, fienv, env)?;
+                let cfunc = CompiledFunction { signature: self.signature, 
+                    data: CompiledFuncData::Local { instructions: instrs, lit_strings: fenv.lit_strings, stack_frame: fenv.stack_frame } };
+                Ok((cfunc, fenv.label_gen))
+            }
+            FuncData::Extern => Ok((CompiledFunction { signature: self.signature, data: CompiledFuncData::Extern }, label_gen))
+        }
     }
 
 }

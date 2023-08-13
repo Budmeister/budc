@@ -77,7 +77,7 @@ pub fn display_err(err: BudErr, func: Option<&str>, lines: &[&str]) {
             let line_num_str = format!("{}", line_num);
             let line_num_str = pad_spaces_beginning(&line_num_str, num_width);
             let line_num_str = format!("  {} |    ", line_num_str);
-            println!("{}{}", line_num_str, line);
+            print!("{}{}", line_num_str, line);
 
             // Print out the indicator
             print!("{}", " ".repeat(line_num_str.len()));
@@ -195,5 +195,57 @@ macro_rules! u_err {
             msg: format!($msg $(, $($arg)*)?),
             location: None,
         }.into())
+    };
+}
+
+#[macro_export]
+macro_rules! c_erru_opt {
+    ($location:expr, $msg:literal $(, $($arg:tt)*)?) => {
+        $crate::error::CompilerErr {
+            msg: format!($msg $(, $($arg)*)?),
+            location: $location.map(|r| r.to_owned()),
+        }.into()
+    };
+}
+
+#[macro_export]
+macro_rules! u_erru_opt {
+    ($location:expr, $msg:literal $(, $($arg:tt)*)?) => {
+        $crate::error::UserErr {
+            msg: format!($msg $(, $($arg)*)?),
+            location: $location.map(|r| r.to_owned()),
+        }.into()
+    };
+}
+
+#[macro_export]
+macro_rules! c_erru {
+    ($location:expr, $msg:literal $(, $($arg:tt)*)?) => {
+        $crate::error::CompilerErr {
+            msg: format!($msg $(, $($arg)*)?),
+            location: Some($location.to_owned()),
+        }.into()
+    };
+    ($msg:literal $(, $($arg:tt)*)?) => {
+        $crate::error::CompilerErr {
+            msg: format!($msg $(, $($arg)*)?),
+            location: None,
+        }.into()
+    };
+}
+
+#[macro_export]
+macro_rules! u_erru {
+    ($location:expr, $msg:literal $(, $($arg:tt)*)?) => {
+        $crate::error::UserErr {
+            msg: format!($msg $(, $($arg)*)?),
+            location: Some($location.to_owned()),
+        }.into()
+    };
+    ($msg:literal $(, $($arg:tt)*)?) => {
+        $crate::error::UserErr {
+            msg: format!($msg $(, $($arg)*)?),
+            location: None,
+        }.into()
     };
 }

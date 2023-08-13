@@ -29,6 +29,10 @@ grammar::grammar!(
         LeftSquare,
         #[token("]")]
         RightSquare,
+        #[token("[[")]
+        LeftDoubleSquare,
+        #[token("]]")]
+        RightDoubleSquare,
         #[token(";")]
         Semicolon,
         #[token(":")]
@@ -67,6 +71,10 @@ grammar::grammar!(
         Continue,
         #[token("struct")]
         Struct,
+        #[token("extern")]
+        Extern,
+        #[token("empty")]
+        Empty,
         #[regex(r"[_a-zA-Z]([_a-zA-Z0-9])*")]
         IdGen,
 
@@ -120,6 +128,8 @@ grammar::grammar!(
         Items,
         Item,
         FuncDecl,
+        ExternFunc,
+        ExternBlock,
         StructDecl,
         ImportDecl,
         Path,
@@ -137,6 +147,7 @@ grammar::grammar!(
         Exprs,
         NonBinExpr,
         BlockExpr,
+        ArrExpr,
         AssignExpr,
         ReturnExpr,
         CleanupCall,
@@ -161,7 +172,13 @@ grammar::grammar!(
         Item        => FuncDecl;
         Item        => StructDecl;
         Item        => ImportDecl;
+        Item        => VarDecl, Semicolon;
+        Item        => ExternFunc;
+        Item        => ExternBlock;
+        Item        => Extern, Item;
         FuncDecl    => VarDecl, VarDeclsPar, Expr;
+        ExternFunc  => VarDecl, VarDeclsPar, Semicolon;
+        ExternBlock => Extern, LeftSquiggly, Items, RightSquiggly;
         StructDecl  => Struct, IdGen, LeftSquiggly, VarDecls, RightSquiggly;
         ImportDecl  => Import, Path;
         Path        => File;
@@ -204,6 +221,7 @@ grammar::grammar!(
         Expr    => Expr, Semicolon;
 
         NonBinExpr  => BlockExpr;
+        NonBinExpr  => ArrExpr;
         NonBinExpr  => AssignExpr;
         NonBinExpr  => VarDeclAssgn;
         NonBinExpr  => ReturnExpr;
@@ -225,6 +243,7 @@ grammar::grammar!(
         TypeExpr    => Reference, LeftRound, TypeExpr, RightRound;
 
         BlockExpr   => LeftSquiggly, Expr2, RightSquiggly;
+        ArrExpr     => LeftDoubleSquare, Exprs, RightDoubleSquare;
         AssignExpr  => IdExpr, Assign, Expr, Semicolon;
         VarDeclAssgn=> VarDecl, Assign, Expr, Semicolon;
         ReturnExpr  => Return, Semicolon;
@@ -238,7 +257,7 @@ grammar::grammar!(
         IdExpr      => Star, IdExpr;
         ParenExpr   => LeftRound, Expr, RightRound;
         UnaryExpr   => Unop, NonBinExpr;
-        BinaryExpr  => NonBinExpr, Binop, BinaryExpr;
+        BinaryExpr  => BinaryExpr, Binop, NonBinExpr;
         BinaryExpr  => NonBinExpr;
         IfExpr      => If, Expr, BlockExpr;
         IfElse      => If, Expr, BlockExpr, Else, BlockExpr;
@@ -253,6 +272,7 @@ grammar::grammar!(
         LitExpr     => CharGen;
         NonBinExpr  => Break;
         NonBinExpr  => Continue;
+        NonBinExpr  => Empty;
 
         // Operators
         Binop       => Plus;
@@ -495,6 +515,8 @@ impl std::fmt::Display for BudTerminal {
                 BudTerminal::RightSquiggly => "}".to_string(),
                 BudTerminal::LeftSquare => "[".to_string(),
                 BudTerminal::RightSquare => "]".to_string(),
+                BudTerminal::LeftDoubleSquare => "[[".to_string(),
+                BudTerminal::RightDoubleSquare => "]]".to_string(),
                 BudTerminal::Semicolon => ";".to_string(),
                 BudTerminal::Colon => ":".to_string(),
                 BudTerminal::Dot => ".".to_string(),
@@ -515,6 +537,8 @@ impl std::fmt::Display for BudTerminal {
                 BudTerminal::Break => "break".to_string(),
                 BudTerminal::Continue => "continue".to_string(),
                 BudTerminal::Struct => "struct".to_string(),
+                BudTerminal::Extern => "extern".to_string(),
+                BudTerminal::Empty => "empty".to_string(),
                 BudTerminal::IdGen => "id".to_string(),
                 BudTerminal::Plus => "+".to_string(),
                 BudTerminal::Minus => "-".to_string(),
@@ -550,6 +574,8 @@ impl std::fmt::Display for BudNonTerminal {
                 BudNonTerminal::Items => "Is",
                 BudNonTerminal::Item => "I",
                 BudNonTerminal::FuncDecl => "F",
+                BudNonTerminal::ExternFunc => "Ef",
+                BudNonTerminal::ExternBlock => "Ex",
                 BudNonTerminal::StructDecl => "S",
                 BudNonTerminal::ImportDecl => "Im",
                 BudNonTerminal::Path => "P",
@@ -566,6 +592,7 @@ impl std::fmt::Display for BudNonTerminal {
                 BudNonTerminal::Exprs => "Es",
                 BudNonTerminal::NonBinExpr => "Nbe",
                 BudNonTerminal::BlockExpr => "Ble",
+                BudNonTerminal::ArrExpr => "Ar",
                 BudNonTerminal::VarDeclAssgn => "Va",
                 BudNonTerminal::AssignExpr => "Ae",
                 BudNonTerminal::ReturnExpr => "Re",
@@ -589,6 +616,12 @@ impl std::fmt::Display for BudNonTerminal {
     }
 }
 
+macro_rules! invalid {
+    ($range:expr, $n:expr, $children:expr) => {
+        c_err!($range, "Invalid node for {} {:?}", $n, $children)
+    }
+}
+
 use crate::parse::Node;
 type BudNode = Node<BudTerminal, BudNonTerminal>;
 type BudNodes = Vec<BudNode>;
@@ -601,11 +634,16 @@ pub enum Item {
     FuncDecl(VarDecl, VarDecls, Box<Expr>, Range<usize>),
     StructDecl(Id, VarDecls, Range<usize>),
     ImportDecl(Path, Range<usize>),
+    VarDecl(VarDecl, Range<usize>),
+    ExternFunc(VarDecl, VarDecls, Range<usize>),
+    ExternBlock(Items, Range<usize>),
+    ExternItem(Box<Item>, Range<usize>),
 }
 pub type Items = Vec<Item>;
 impl Item {
     pub fn new(children: &BudNodes, range: Range<usize>) -> Result<Item, BudErr> {
         match &children[..] {
+            // I -> F
             [Node::NonTm {
                 n: N::FuncDecl,
                 children,
@@ -629,10 +667,9 @@ impl Item {
                     Box::new(Expr::new(expr, range.to_owned())?),
                     range.to_owned(),
                 )),
-                _ => {
-                    c_err!(range, "Invalid node for {} {:?}", N::FuncDecl, children)
-                }
+                _ => invalid!(range, N::FuncDecl, children)
             },
+            // I -> S
             [Node::NonTm {
                 n: N::StructDecl,
                 children,
@@ -659,10 +696,9 @@ impl Item {
                     VarDecl::news(fields, range.to_owned())?,
                     range.to_owned(),
                 )),
-                _ => {
-                    c_err!(range, "Invalid node for {} {:?}", N::StructDecl, children)
-                }
+                _ => invalid!(range, N::StructDecl, children)
             },
+            // I - Im
             [Node::NonTm {
                 n: N::ImportDecl,
                 children,
@@ -675,16 +711,77 @@ impl Item {
                     n: N::Path,
                     children: _path,
                     range,
-                }] => {
-                    u_err!(range, "Import statements not supported yet")
-                }
-                _ => {
-                    c_err!(range, "Invalid node for {} {:?}", N::ImportDecl, children)
-                }
+                }] => u_err!(range, "Import statements not supported yet"),
+                _ => invalid!(range, N::ImportDecl, children)
             },
-            _ => {
-                c_err!(range, "Invalid node for {} {:?}", N::Item, children)
+            // I -> V ;
+            [Node::NonTm {
+                n: N::VarDecl,
+                children,
+                range
+            }, Node::Tm {
+                t: T::Semicolon,
+                range: _
+            }] => Ok(Item::VarDecl(
+                VarDecl::new(children, range.to_owned())?,
+                range.to_owned()
+            )),
+            // I -> Ef
+            [Node::NonTm {
+                n: N::ExternFunc,
+                children,
+                range
+            }] => match &children[..] {
+                [Node::NonTm {
+                    n: N::VarDecl,
+                    children: name,
+                    range,
+                }, Node::NonTm {
+                    n: N::VarDeclsPar,
+                    children: args,
+                    range: _
+                }, Node::Tm {
+                    t: T::Semicolon,
+                    range: _
+                }] => Ok(Item::ExternFunc(
+                    VarDecl::new(name, range.to_owned())?,
+                    VarDecl::news(args, range.to_owned())?,
+                    range.to_owned()
+                )),
+                _ => invalid!(range, N::ExternFunc, children)
             }
+            // I -> Ex
+            [Node::Tm {
+                t: T::Extern,
+                range,
+            }, Node::Tm {
+                t: T::LeftSquiggly,
+                range: _
+            }, Node::NonTm {
+                n: N::Items,
+                children: items,
+                range: irange
+            }, Node::Tm {
+                t: T::RightSquiggly,
+                range: _
+            }] => Ok(Item::ExternBlock(Item::news(
+                items,
+                irange.to_owned())?,
+                range.to_owned())
+            ),
+            // I -> extern I
+            [Node::Tm {
+                t: T::Extern,
+                range: _
+            }, Node::NonTm {
+                n: N::Item,
+                children,
+                range,
+            }] => Ok(Item::ExternItem(
+                Box::new(Item::new(children, range.to_owned())?),
+                range.to_owned()
+            )),
+            _ => invalid!(range, N::Item, children)
         }
     }
     pub fn news(children: &BudNodes, range: Range<usize>) -> Result<Items, BudErr> {
@@ -692,6 +789,7 @@ impl Item {
         let mut items = Vec::new();
         loop {
             match &children[..] {
+                // Is -> I Is
                 [Node::NonTm {
                     n: N::Item,
                     children: i_children,
@@ -704,6 +802,7 @@ impl Item {
                     items.push(Item::new(i_children, range.to_owned())?);
                     children = is_children.clone();
                 }
+                // Is -> I
                 [Node::NonTm {
                     n: N::Item,
                     children,
@@ -712,9 +811,7 @@ impl Item {
                     items.push(Item::new(children, range.to_owned())?);
                     break;
                 }
-                _ => {
-                    return c_err!(range, "Invalid node for {} {:?}", N::Items, children);
-                }
+                _ => return invalid!(range, N::Items, children),
             }
         }
         Ok(items)
@@ -742,6 +839,7 @@ pub type Id = String;
 impl VarDecl {
     pub fn new(children: &BudNodes, _range: Range<usize>) -> Result<VarDecl, BudErr> {
         match &children[..] {
+            // V -> Te id
             [Node::NonTm {
                 n: N::TypeExpr,
                 children: typ,
@@ -931,23 +1029,23 @@ impl Ranged for Expr {
 
 #[derive(Debug, Clone)]
 pub enum BinExpr {
-    Binary(Box<NonBinExpr>, BudBinop, Box<BinExpr>, Range<usize>),
+    Binary(Box<BinExpr>, BudBinop, Box<NonBinExpr>, Range<usize>),
     NonBin(Box<NonBinExpr>, Range<usize>),
 }
 impl BinExpr {
     pub fn new(children: &BudNodes, range: Range<usize>) -> Result<BinExpr, BudErr> {
         match &children[..] {
             [Node::NonTm {
-                n: N::NonBinExpr,
-                children: nbe,
+                n: N::BinaryExpr,
+                children: be,
                 range: range1,
             }, Node::NonTm {
                 n: N::Binop,
                 children: b_children,
                 range: rangeb,
             }, Node::NonTm {
-                n: N::BinaryExpr,
-                children: be,
+                n: N::NonBinExpr,
+                children: nbe,
                 range: _range2,
             }] => {
                 let b;
@@ -963,9 +1061,9 @@ impl BinExpr {
                     }
                 }
                 Ok(BinExpr::Binary(
-                    Box::new(NonBinExpr::new(nbe, range1.to_owned())?),
-                    BudBinop::new(b)?,
                     Box::new(BinExpr::new(be, range1.to_owned())?),
+                    BudBinop::new(b)?,
+                    Box::new(NonBinExpr::new(nbe, range1.to_owned())?),
                     range,
                 ))
             }
@@ -1005,6 +1103,7 @@ impl Ranged for BinExpr {
 #[derive(Debug, Clone)]
 pub enum NonBinExpr {
     BlockExpr(Exprs, Range<usize>),
+    ArrExpr(Exprs, Range<usize>),
     AssignExpr(Box<IdExpr>, Box<Expr>, Range<usize>),
     VarDeclAssgn(Box<VarDecl>, Box<Expr>, Range<usize>),
     ReturnExpr(Option<Box<Expr>>, Range<usize>),
@@ -1022,6 +1121,7 @@ pub enum NonBinExpr {
     DoWhile(Box<Expr>, Box<Expr>, Range<usize>), // In the order they appear
     Break(Range<usize>),
     Continue(Range<usize>),
+    Empty(Range<usize>),
 }
 impl NonBinExpr {
     pub fn new(children: &BudNodes, range: Range<usize>) -> Result<NonBinExpr, BudErr> {
@@ -1031,6 +1131,11 @@ impl NonBinExpr {
                 children,
                 range,
             }] => Self::block_expr(children, range.to_owned()),
+            [Node::NonTm {
+                n: N::ArrExpr,
+                children,
+                range,
+            }] => Self::arr_expr(children, range.to_owned()),
             [Node::NonTm {
                 n: N::AssignExpr,
                 children,
@@ -1106,24 +1211,37 @@ impl NonBinExpr {
                 children,
                 range,
             }] => Self::do_while(children, range.to_owned()),
-            [Node::Tm { t: T::Break, range }] => Ok(NonBinExpr::Break(range.to_owned())),
+            [Node::Tm {
+                t: T::Break,
+                range
+            }] => Ok(NonBinExpr::Break(range.to_owned())),
             [Node::Tm {
                 t: T::Continue,
                 range,
             }] => Ok(NonBinExpr::Continue(range.to_owned())),
+            [Node::Tm {
+                t: T::Empty,
+                range,
+            }] => Ok(NonBinExpr::Empty(range.to_owned())),
             _ => {
                 c_err!(range, "Invalid node for {} {:?}", N::NonBinExpr, children)
             }
         }
     }
     fn block_expr(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         Ok(NonBinExpr::BlockExpr(Expr::news(children, range.to_owned())?, range))
     }
+    fn arr_expr(
+        children: &BudNodes,
+        range: Range<usize>,
+    ) -> Result<NonBinExpr, BudErr> {
+        Ok(NonBinExpr::ArrExpr(Expr::news(children, range.to_owned())?, range))
+    }
     fn assign_expr(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
@@ -1152,7 +1270,7 @@ impl NonBinExpr {
         }
     }
     fn var_decl_assign(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
@@ -1181,7 +1299,7 @@ impl NonBinExpr {
         }
     }
     fn return_expr(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
@@ -1212,7 +1330,7 @@ impl NonBinExpr {
         }
     }
     fn cleanup_call(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
@@ -1229,7 +1347,7 @@ impl NonBinExpr {
         }
     }
     fn cleanup_expr(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
@@ -1253,7 +1371,7 @@ impl NonBinExpr {
         }
     }
     fn id_expr(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         Ok(NonBinExpr::IdExpr(
@@ -1262,13 +1380,13 @@ impl NonBinExpr {
         ))
     }
     fn lit_expr(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         Ok(NonBinExpr::LitExpr(Literal::new(children)?, range))
     }
     fn paren_expr(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
@@ -1292,7 +1410,7 @@ impl NonBinExpr {
         }
     }
     fn unary_expr(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
@@ -1326,7 +1444,7 @@ impl NonBinExpr {
         }
     }
     fn if_expr(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
@@ -1358,7 +1476,7 @@ impl NonBinExpr {
             }
         }
     }
-    fn if_else(children: &Vec<Node<BudTerminal, BudNonTerminal>>, range: Range<usize>) -> Result<NonBinExpr, BudErr> {
+    fn if_else(children: &BudNodes, range: Range<usize>) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
             [Node::Tm { t: T::If, range: _ }, Node::NonTm {
                 n: N::Expr,
@@ -1402,7 +1520,7 @@ impl NonBinExpr {
         }
     }
     fn unless_expr(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
@@ -1438,7 +1556,7 @@ impl NonBinExpr {
         }
     }
     fn unless_else(
-        children: &Vec<Node<BudTerminal, BudNonTerminal>>,
+        children: &BudNodes,
         range: Range<usize>,
     ) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
@@ -1486,7 +1604,7 @@ impl NonBinExpr {
             }
         }
     }
-    fn while_expr(children: &Vec<Node<BudTerminal, BudNonTerminal>>, range: Range<usize>) -> Result<NonBinExpr, BudErr> {
+    fn while_expr(children: &BudNodes, range: Range<usize>) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
             [Node::Tm { t: T::While, range: _ }, Node::NonTm {
                 n: N::Expr,
@@ -1516,7 +1634,7 @@ impl NonBinExpr {
             }
         }
     }
-    fn do_while(children: &Vec<Node<BudTerminal, BudNonTerminal>>, range: Range<usize>) -> Result<NonBinExpr, BudErr> {
+    fn do_while(children: &BudNodes, range: Range<usize>) -> Result<NonBinExpr, BudErr> {
         match &children[..] {
             [Node::Tm { t: T::Do, range: _ }, Node::NonTm {
                 n: N::BlockExpr,
@@ -1556,6 +1674,7 @@ impl Into<Result<i32, BudErr>> for NonBinExpr {
             NonBinExpr::LitExpr(Literal::Num(num), _) => Ok(num),
             NonBinExpr::LitExpr(Literal::Str(string), range) => c_err!(range, "Cannot convert string \"{}\" to num", string),
             NonBinExpr::BlockExpr(_, range) => u_err!(range, "Cannot convert BlockExpr to num"),
+            NonBinExpr::ArrExpr(_, range) => u_err!(range, "Cannot convert ArrExpr to num"),
             NonBinExpr::AssignExpr(_, _, range) => u_err!(range, "Cannot convert AssignExpr to num"),
             NonBinExpr::VarDeclAssgn(_, _, range) => u_err!(range, "Cannot convert VarDeclAssgn to num"),
             NonBinExpr::ReturnExpr(_, range) => u_err!(range, "Cannot convert ReturnExpr to num"),
@@ -1572,6 +1691,7 @@ impl Into<Result<i32, BudErr>> for NonBinExpr {
             NonBinExpr::DoWhile(_, _, range) => u_err!(range, "Cannot convert DoWhile to num"),
             NonBinExpr::Break(range) => u_err!(range, "Cannot convert Break to num"),
             NonBinExpr::Continue(range) => u_err!(range, "Cannot convert Continue to num"),
+            NonBinExpr::Empty(range) => u_err!(range, "Cannot convert Empty to num"),
         }
     }
 }
@@ -1579,6 +1699,7 @@ impl Ranged for NonBinExpr {
     fn get_range(&self) -> &Range<usize> {
         match self {
             NonBinExpr::BlockExpr(_, range) => range,
+            NonBinExpr::ArrExpr(_, range) => range,
             NonBinExpr::AssignExpr(_, _, range) => range,
             NonBinExpr::VarDeclAssgn(_, _, range) => range,
             NonBinExpr::ReturnExpr(_, range) => range,
@@ -1596,6 +1717,7 @@ impl Ranged for NonBinExpr {
             NonBinExpr::DoWhile(_, _, range) => range,
             NonBinExpr::Break(range) => range,
             NonBinExpr::Continue(range) => range,
+            NonBinExpr::Empty(range) => range,
         }
     }
 }

@@ -28,17 +28,17 @@ pub fn compile_binopi_iinstr(src: Imm, b: BudBinop, dest: Place, range: Range<us
         BudBinop::Minus => compile_minus(src, dest, size, range, instrs, fenv, env),
         BudBinop::Times => compile_times(src, dest, size, range, instrs, fenv, env),
         BudBinop::Div => compile_div(src, dest, size, range, instrs, fenv, env),
-        BudBinop::And => compile_and(src, dest, size, range, instrs, fenv),
-        BudBinop::Or => compile_or(src, dest, size, range, instrs, fenv),
-        BudBinop::BitAnd => compile_bitand(src, dest, size, range, instrs, fenv),
-        BudBinop::BitOr => compile_bitor(src, dest, size, range, instrs, fenv),
-        BudBinop::BitXor => compile_bitxor(src, dest, size, range, instrs, fenv),
-        BudBinop::Equal => compile_equal(src, dest, size, range, instrs, fenv),
-        BudBinop::NotEq => compile_noteq(src, dest, size, range, instrs, fenv),
-        BudBinop::Greater => compile_greater(src, dest, size, range, instrs, fenv),
-        BudBinop::GrtrEq => compile_grtreq(src, dest, size, range, instrs, fenv),
-        BudBinop::Less => compile_less(src, dest, size, range, instrs, fenv),
-        BudBinop::LessEq => compile_lesseq(src, dest, size, range, instrs, fenv),
+        BudBinop::And => compile_and(src, dest, size, range, instrs, fenv, env),
+        BudBinop::Or => compile_or(src, dest, size, range, instrs, fenv, env),
+        BudBinop::BitAnd => compile_bitand(src, dest, size, range, instrs, fenv, env),
+        BudBinop::BitOr => compile_bitor(src, dest, size, range, instrs, fenv, env),
+        BudBinop::BitXor => compile_bitxor(src, dest, size, range, instrs, fenv, env),
+        BudBinop::Equal => compile_equal(src, dest, size, range, instrs, fenv, env),
+        BudBinop::NotEq => compile_noteq(src, dest, size, range, instrs, fenv, env),
+        BudBinop::Greater => compile_greater(src, dest, size, range, instrs, fenv, env),
+        BudBinop::GrtrEq => compile_grtreq(src, dest, size, range, instrs, fenv, env),
+        BudBinop::Less => compile_less(src, dest, size, range, instrs, fenv, env),
+        BudBinop::LessEq => compile_lesseq(src, dest, size, range, instrs, fenv, env),
     }
 }
 
@@ -51,7 +51,7 @@ fn compile_plus(src: Imm, dest: Place, size: DataSize, range: Range<usize>, inst
     } else {
         let dreg = imm_to_dreg(src, instrs, Proxy1)?;
         let src = dreg.into();
-        let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy2)?;
+        let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy2)?;
         let instr = Add(size, src, dest).validate()?;
         instrs.push(instr);
     }
@@ -67,7 +67,7 @@ fn compile_minus(src: Imm, dest: Place, size: DataSize, range: Range<usize>, ins
     } else {
         let dreg = imm_to_dreg(src, instrs, Proxy1)?;
         let src = dreg.into();
-        let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy2)?;
+        let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy2)?;
         let instr = Sub(size, src, dest).validate()?;
         instrs.push(instr);
     }
@@ -85,7 +85,7 @@ fn compile_times(src: Imm, dest: Place, size: DataSize, range: Range<usize>, ins
     if !live {
         extend(dest_dreg, DataSize::Word, size, instrs)?;
         let dest_dead = dest_dreg.into();
-        let dest_live = fenv.place_to_addr_mode(dest, range, instrs, Proxy2)?;
+        let dest_live = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy2)?;
         let instr = Move(size, dest_dead, dest_live).validate()?;
         instrs.push(instr);
     }
@@ -104,7 +104,7 @@ fn compile_div(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instr
     let instr = Divs(src.into(), dest_dreg).validate()?;
     instrs.push(instr);
     if !live {
-        let dest_real = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+        let dest_real = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
         let dest_dead = AddrMode::D(dest_dreg);
         // The top word in this dreg is the remainder. If the destination is not 32 bits, the remainder is lost
         let instr = Move(size, dest_dead, dest_real).validate()?;
@@ -113,45 +113,45 @@ fn compile_div(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instr
     Ok(())
 }
 
-fn compile_and(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+fn compile_and(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
     // `<exp> && true` is just <exp>
     // `<exp> && false` is just 0
     if src == 0 {
-        let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+        let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
         let instr = Move(size, 0.into(), dest).validate()?;
         instrs.push(instr);
     }
     Ok(())
 }
 
-fn compile_or(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+fn compile_or(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
     // `<exp> || true` is just 1
     // `<exp> || false` is just <exp>
     if src != 0 {
-        let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+        let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
         let instr = Move(size, 1.into(), dest).validate()?;
         instrs.push(instr);
     }
     Ok(())
 }
 
-fn compile_bitand(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
-    let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+fn compile_bitand(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
     let instr = And(size, src.into(), dest).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-fn compile_bitor(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
-    let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+fn compile_bitor(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
     let instr = Or(size, src.into(), dest).validate()?;
     instrs.push(instr);
     Ok(())
 }
 
-fn compile_bitxor(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+fn compile_bitxor(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
     let src = imm_to_dreg(src, instrs, Proxy1)?;
-    let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy2)?;
+    let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy2)?;
     // Technically this could fail if dest is PCIndDisp or PCIndIdxDisp, but I will probably
     // remove those anyway
     let instr = Eor(size, src, dest).validate()?;
@@ -159,43 +159,43 @@ fn compile_bitxor(src: Imm, dest: Place, size: DataSize, range: Range<usize>, in
     Ok(())
 }
 
-fn compile_equal(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
-    let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+fn compile_equal(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
     cmpi(src, dest.clone(), size, instrs, fenv)?;
     cc_to_eq(size, dest, instrs, fenv)?;
     Ok(())
 }
 
-fn compile_noteq(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
-    let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+fn compile_noteq(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
     cmpi(src, dest.clone(), size, instrs, fenv)?;
     cc_to_ne(size, dest, instrs, fenv)?;
     Ok(())
 }
 
-fn compile_greater(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
-    let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+fn compile_greater(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
     cmpi(src, dest.clone(), size, instrs, fenv)?;
     cc_to_gt(size, dest, instrs, fenv)?;
     Ok(())
 }
 
-fn compile_grtreq(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
-    let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+fn compile_grtreq(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
     cmpi(src, dest.clone(), size, instrs, fenv)?;
     cc_to_ge(size, dest, instrs, fenv)?;
     Ok(())
 }
 
-fn compile_less(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
-    let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+fn compile_less(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
     cmpi(src, dest.clone(), size, instrs, fenv)?;
     cc_to_lt(size, dest, instrs, fenv)?;
     Ok(())
 }
 
-fn compile_lesseq(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
-    let dest = fenv.place_to_addr_mode(dest, range, instrs, Proxy1)?;
+fn compile_lesseq(src: Imm, dest: Place, size: DataSize, range: Range<usize>, instrs: &mut Vec<ValidInstruction>, fenv: &mut FunctionEnvironment, env: &Environment) -> Result<(), BudErr> {
+    let dest = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
     cmpi(src, dest.clone(), size, instrs, fenv)?;
     cc_to_le(size, dest, instrs, fenv)?;
     Ok(())

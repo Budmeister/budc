@@ -132,15 +132,15 @@ impl FunctionInterEnvironment {
         self.lit_strings.push((ind, string));
         ind
     }
-    pub fn get_var(&self, name: &String) -> Option<Field> {
+    pub fn get_var(&self, name: &str) -> Option<&Field> {
         for field in &self.vars {
             if field.name == *name {
-                return Some(field.clone());
+                return Some(field);
             }
         }
         None
     }
-    pub fn has_var(&self, name: &String) -> bool {
+    pub fn has_var(&self, name: &str) -> bool {
         matches!(self.get_var(name), Some(_))
     }
     pub fn add_var(&mut self, field: &Field) -> Result<(), UserErr> {
@@ -215,7 +215,7 @@ impl FunctionInterEnvironment {
         instrs.push(instr);
         Ok(())
     }
-    pub fn retva(&mut self, name: &String, instrs: &mut Vec<InterInstr>, env: &Environment, range: Range<usize>) -> Result<(), UserErr> {
+    pub fn retva(&mut self, name: &str, instrs: &mut Vec<InterInstr>, env: &Environment, range: Range<usize>) -> Result<(), UserErr> {
         let var = match self.get_var(name) {
             Some(name) => name,
             None => {
@@ -227,7 +227,7 @@ impl FunctionInterEnvironment {
             return u_err!(range, "Function has return type {} but tried to return pointer to local variable {} of type {}", self.return_type(), var.name, var.tt);
         }
         let to = env.ret_place(self.get_name(), range.to_owned())?;
-        let instr = InterInstr::MoVA(var.name, to, range.to_owned());
+        let instr = InterInstr::MoVA(var.name.clone(), to, range.to_owned());
         instrs.push(instr);
         let instr = InterInstr::Rts(range);
         instrs.push(instr);

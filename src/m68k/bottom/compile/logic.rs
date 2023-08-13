@@ -18,7 +18,7 @@ pub fn compile_tst_iinstr(from: Place, range: Range<usize>, instrs: &mut Vec<Val
     let from = if fenv.place_is_areg(&from) {
         fenv.place_to_dreg(from, range, instrs, env, Proxy1)?.0.into()
     } else {
-        fenv.place_to_addr_mode(from, range, instrs, Proxy1)?
+        fenv.place_to_addr_mode(from, range, instrs, env, Proxy1)?
     };
     let instr = Tst(size, from).validate()?;
     instrs.push(instr);

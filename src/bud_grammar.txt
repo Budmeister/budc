@@ -1,13 +1,20 @@
 Grammar for the Bud programming language
-Version 0.2.0
+Version 0.3.0
 Author: Brian Smith
 Year:   2023
+
+New for Version 0.3.0:
+Added: extern, empty, [[, ]], Ar (array expression), Ef (extern function), Ex (extern block)
+    Global variables are the same as VarDecl
+Changed: {Be => Nbe B Be} to {Be => Be B Nbe}
 
 Non-terminals:
 S' (Start)
 Is (Items)              [One or more functions, structs, imports, etc.]
 I (Item)                [A function, struct, import, etc.]
 F (FuncDecl)            [Function declaration]
+Ef (ExternFunc)         [Function with no body]
+Ex (ExternBlock)        [extern KW followed by a block of items]
 S (StructDecl)          [Struct declaration]
 Im (ImportDecl)         [File import]
 P (Path)                [File path literal (no quotes) - "/"-separated Files]
@@ -24,6 +31,7 @@ E2 (Expr2)              [One or more expressions in a row--for statement express
 Es (Exprs)              [One or more comma-separated expressions]
 Nbe (NonBinExpr)        [An expression that is not a binary expression]
 Ble (BlockExpr)         [An Expr2 in squiggly brackets]
+Ar (ArrExpr)            [Comma-separated Exprs enclosed in double square brackets ([[ Es ]])]
 Ae (AssignExpr)         [IdExpr = Expr;]
 Va (VarDeclAssgn)       [Variable declaration and assignment (with ;)]
 Re (ReturnExpression)   [Return statement (with ;)]
@@ -59,6 +67,8 @@ else
 }
 [
 ]
+[[
+]]
 ;
 ,
 =
@@ -69,6 +79,8 @@ while
 break
 continue
 struct
+extern
+empty
 
 +
 -
@@ -94,7 +106,13 @@ S' -> Is
 I -> F
 I -> S
 I -> Im
+I -> V ;
+I -> Ef
+I -> Ex
+I -> extern I
 F -> V Vsp E
+Ef -> V Vsp ;
+Ex -> extern { Is }
 S -> struct id { Vs }
 Im -> import P
 P -> Fi
@@ -134,6 +152,7 @@ E -> Be         # Since NonBinExpr work as BinaryExpr
 E -> E;
 
 Nbe -> Ble
+Nbe -> Ar
 Nbe -> Ae
 Nbe -> Va
 Nbe -> Re
@@ -156,6 +175,7 @@ Te -> @(Te) Sq
 Te -> @(Te)     # @ is the reference operator
 
 Ble -> { E2 }
+Ar -> [[ Es ]]
 Ae -> Ie = E;
 Va -> V = E;
 Re -> return;
@@ -169,7 +189,7 @@ Ie -> id
 Ie -> *Ie
 Pe -> ( E )
 Ue -> U Nbe
-Be -> Nbe B Be
+Be -> Be B Nbe
 Be -> Nbe
 If -> if E Ble
 Ife -> if E Ble else Ble
@@ -185,6 +205,7 @@ Le -> str
 Le -> char
 Nbe -> break
 Nbe -> continue
+Nbe -> empty
 
 # Operators
 B -> +

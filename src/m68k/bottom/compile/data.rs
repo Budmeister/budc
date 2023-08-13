@@ -29,7 +29,7 @@ pub fn compile_neg_iinstr(
         return c_err!("Cannot negate value of type {}", tt);
     }
     let size = tt.get_data_size(env, Some(&range))?.unwrap();
-    let src = fenv.place_to_addr_mode(src, range, instrs, Proxy1)?;
+    let src = fenv.place_to_addr_mode(src, range, instrs, env, Proxy1)?;
     let instr = Neg(size, src).validate()?;
     instrs.push(instr);
     Ok(())
@@ -47,7 +47,7 @@ pub fn compile_bnot_iinstr(
         return c_err!("Cannot find NOT of value of type {}", tt);
     }
     let size = tt.get_data_size(env, Some(&range))?.unwrap();
-    let src = fenv.place_to_addr_mode(src, range, instrs, Proxy1)?;
+    let src = fenv.place_to_addr_mode(src, range, instrs, env, Proxy1)?;
     let instr = Tst(size, src.clone()).validate()?;
     instrs.push(instr);
     cc_to_ne(size, src, instrs, fenv)?;
@@ -65,8 +65,8 @@ pub fn compile_move_iinstr(
     // Move using dest type
     let src_tt = src.get_type();
     let dest_tt = dest.get_type();
-    let src = fenv.place_to_addr_mode(src, range.to_owned(), instrs, Proxy1)?;
-    let dest = fenv.place_to_addr_mode(dest, range.to_owned(), instrs, Proxy2)?;
+    let src = fenv.place_to_addr_mode(src, range.to_owned(), instrs, env, Proxy1)?;
+    let dest = fenv.place_to_addr_mode(dest, range.to_owned(), instrs, env, Proxy2)?;
     let src_size = src_tt.get_size(env, Some(&range))?;
     let src_data_size = src_tt.get_data_size(env, Some(&range))?;
     let mut dest_size = dest_tt.get_size(env, Some(&range))?;
@@ -175,7 +175,7 @@ pub fn compile_movi_iinstr(
         );
     }
     let size = to.get_data_size(env, Some(&range))?.unwrap();
-    let to = fenv.place_to_addr_mode(to, range, instrs, Proxy1)?;
+    let to = fenv.place_to_addr_mode(to, range, instrs, env, Proxy1)?;
     let instr = Move(size, imm.into(), to).validate()?;
     instrs.push(instr);
     Ok(())
@@ -189,6 +189,7 @@ pub fn compile_lea_iinstr(
     range: Range<usize>,
     instrs: &mut Vec<ValidInstruction>,
     fenv: &mut FunctionEnvironment,
+    env: &Environment,
 ) -> Result<(), BudErr> {
     let areg = fenv.atemp_as_areg(atemp, instrs, Proxy1)?.0;
     let dreg = fenv.opt_dtemp_as_opt_dreg(dtemp, instrs, Proxy1)?
@@ -198,7 +199,7 @@ pub fn compile_lea_iinstr(
     let instr = Lea(from, to_areg).validate()?;
     instrs.push(instr);
     if !live {
-        let to = fenv.place_to_addr_mode(Place::ATemp(to), range, instrs, Proxy2)?;
+        let to = fenv.place_to_addr_mode(Place::ATemp(to), range, instrs, env, Proxy2)?;
         let instr = Move(LWord, to_areg.into(), to).validate()?;
         instrs.push(instr);
     }

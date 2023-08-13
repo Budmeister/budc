@@ -7,7 +7,7 @@ use std::{fs::File, io::{BufWriter, Write}, path::Path};
 
 use crate::{error::{UserErr, BudErr}, u_err, m68k::DataSize, bud::escape};
 
-use super::{Environment, CompiledFunction, ValidInstruction, AddrMode, ADBitField, DReg, AReg};
+use super::{Environment, CompiledFunction, ValidInstruction, AddrMode, ADBitField, DReg, AReg, CompiledFuncData, GlobalVar, GlobalVarData};
 
 type IOErr = std::io::Error;
 
@@ -37,10 +37,20 @@ pub fn write_file(env: Environment, filepath: &str) -> Result<(), BudErr> {
     let file = File::create(filepath)?;
     let mut writer = BufWriter::new(file);
 
+    let globals = env.global_vars
+        .values()
+        .filter(|GlobalVar { name: _, data }| *data == GlobalVarData::Local)
+        .map(|GlobalVar { name, data: _ }| Ok((name.name.clone(), name.tt.get_size(&env, None)?)))
+        .collect::<Result<Vec<(String, u32)>, BudErr>>()?;
+
     write_file_preamble(name, &mut writer)?;
 
     for func in env.compiled_funcs {
         write_func(func, &mut writer)?;
+    }
+
+    for (name, size) in globals {
+        writeln!(writer, ".comm {},{}", name, size)?;
     }
     Ok(())
 }
@@ -52,10 +62,22 @@ fn write_file_preamble(filename: &str, writer: &mut BufWriter<File>) -> Result<(
 }
 
 fn write_func(func: CompiledFunction, writer: &mut BufWriter<File>) -> Result<(), BudErr> {
-    write_func_preamble(&func.signature.name.name, func.lit_strings, writer)?;
-    for instr in func.instructions {
-        write_instr(instr, writer)?;
+    match func.data {
+        CompiledFuncData::Local { lit_strings, instructions, stack_frame: _ } => {
+            write_func_preamble(&func.signature.name.name, lit_strings, writer)?;
+            for instr in instructions {
+                write_instr(instr, writer)?;
+            }
+            Ok(())
+        }
+        CompiledFuncData::Extern => {
+            write_extern_func_preamble(&func.signature.name.name, writer)
+        }
     }
+}
+
+fn write_extern_func_preamble(name: &str, writer: &mut BufWriter<File>) -> Result<(), BudErr> {
+    writeln!(writer, ".globl {}", name)?;
     Ok(())
 }
 
