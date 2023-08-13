@@ -32,6 +32,15 @@ i32 fun(i32[3] a, i32 b, @(i32) c, i32[4][3][2] e, i8[3] g) {
     unless b < 10 {
         b = b - 2;
     }
+
+    set_global_num();
+    i32 num1 = global_num;
+    i32 num2 = 4;
+    printf2("The sum of %d and %d is %d\r\n", num1, num2, num1 + num2);
+    printf("Address of global_num: %p\r\n", @global_num);
+
+    i32[9] h = [[1, 2, 3, 4, 5, 6, 7, 8, 9]];
+
     return 1;
 }
 
@@ -44,10 +53,7 @@ void set_global_num() {
 }
 
 i16 main() {
-    set_global_num();
-    i32 num1 = global_num;
-    i32 num2 = 4;
-    printf2("The sum of %d and %d is %d\r\n", num1, num2, num1 + num2);
-    printf("Address of global_num: %p\r\n", @global_num);
+    i32[9] h = [[1, 2, 3, 4, 5, 6, 7, 8, 9]];
+    printf("h: [[%d, %d, %d, %d, %d, %d, %d, %d, %d]]\r\n", h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], h[8]);
     return 0;
 }

@@ -160,8 +160,9 @@ pub fn compile_arr_expr(exprs: Vec<Expr>, range: Range<usize>, plan: ReturnPlan,
             }
             for (i, expr) in exprs.into_iter().enumerate().rev() {
                 let to = to.clone().index_into(None, i as i32, false, range.clone(), instrs, fienv, env)?;
-                let plan = ReturnPlan::Move(to);
+                let plan = ReturnPlan::Move(to.clone());
                 compile_expr(expr, plan, instrs, fienv, env)?;
+                to.free(fienv);
             }
             Ok(())
         },

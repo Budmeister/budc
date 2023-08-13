@@ -1008,6 +1008,19 @@ impl Expr {
                 }] => {
                     return Expr::news(children, range.to_owned());
                 }
+                [Node::Tm {
+                    t: T::LeftDoubleSquare,
+                    range: _,
+                }, Node::NonTm {
+                    n: N::Exprs,
+                    children,
+                    range
+                }, Node::Tm {
+                    t: T::RightDoubleSquare,
+                    range: _,
+                }] => {
+                    return Expr::news(children, range.to_owned());
+                }
                 _ => {
                     return c_err!(range, "Invalid node for {} {:?}", N::Exprs, children);
                 }
