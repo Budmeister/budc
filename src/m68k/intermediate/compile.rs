@@ -650,6 +650,8 @@ pub fn compile_while_expr(cond: Expr, expr: Expr, plan: ReturnPlan, instrs: &mut
     fienv.push_loop_stack(break_label, continue_label);
     compile_expr(expr, ReturnPlan::None, instrs, fienv, env)?;
     fienv.pop_loop_stack();
+    let instr = InterInstr::Goto(continue_label, cond_range.to_owned());
+    instrs.push(instr);
     let instr = InterInstr::Lbl(break_label, cond_range);
     instrs.push(instr);
     if let ReturnPlan::Return = plan {

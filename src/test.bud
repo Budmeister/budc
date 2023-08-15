@@ -64,10 +64,16 @@ void set_global_num() {
 }
 
 i16 main() {
-    printf("sp: %p \r\n");
-    printf("sp: %p \r\n");
-    printf("sp: %p \r\n");
-    printf("sp: %p \r\n");
+    i32 sum = 0;
+    i32 i = 0;
+
+    do {
+        printf("Adding %d to the sum\r\n", i);
+        sum = sum + i;
+        i = i + 1;
+    } while i < 5;
+    printf("Loop ran %d times\r\n", i);
+    printf("The sum from 0-5 is %d\r\n", sum);
 
     return 0;
 }
