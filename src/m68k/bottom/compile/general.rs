@@ -169,7 +169,7 @@ fn get_temp_maps(
     dtemp_popular.sort_by(|a, b| b.0.cmp(&a.0));
     atemp_popular.sort_by(|a, b| b.0.cmp(&a.0));
 
-    let dregs = [D0, D1, D2, D3, D4, D5];
+    let dregs = [D1, D2, D3, D4, D5];
     let aregs = [A0, A1, A2, A3];
 
     let dtemp_map = Iterator::chain(

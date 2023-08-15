@@ -59,7 +59,10 @@ void set_global_num() {
 i16 main() {
     i8[6] buf = empty;
     getl(@buf, 6);
-    i32 num = stoi(@buf);
+    i32 num = atoi(@buf);
+
+    i32 output = num > 10;
+    printf("num > 10: %d\r\n", output);
 
     if num > 10 {
         printf("The number was greater than 10\r\n");
