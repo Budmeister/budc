@@ -134,7 +134,7 @@ fn get_temp_maps(
                 update_temp_usages(&mut dtemp_usages, *dtemp2);
             }
 
-            InterInstr::Call(_, _) => {}
+            InterInstr::Call(_, _, _) => {}
             InterInstr::Lbl(_, _) => {}
             InterInstr::Save(_, _) => {}
             InterInstr::Load(_, _) => {}
@@ -269,7 +269,7 @@ pub fn compile_iinstr(
         InterInstr::Chki(len, to, range) => compile_chki_iinstr(len as Imm, to, range, instrs, fenv),
         InterInstr::Save(temps, range) => compile_save_iinstr(&temps, range, instrs, fenv),
         InterInstr::Load(temps, range) => compile_load_iinstr(&temps, range, instrs, fenv),
-        InterInstr::Call(name, range) => compile_call_iinstr(name, range, instrs, fenv),
+        InterInstr::Call(name, inc, range) => compile_call_iinstr(name, inc, range, instrs, fenv),
         InterInstr::Lbl(lbl, range) => compile_lbl_iinstr(lbl, range, instrs),
         InterInstr::Goto(lbl, range) => compile_goto_iinstr(lbl, range, instrs),
         InterInstr::Rts(range) => compile_rts_iinstr(range, instrs),

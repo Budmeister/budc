@@ -29,12 +29,6 @@ i32 fun(i32[3] a, i32 b, @(i32) c, i32[4][3][2] e, i8[3] g) {
         s = s + b;
         b = b + 1;
     }
-    if b < 10 {
-        b = b + 2;
-    }
-    unless b < 10 {
-        b = b - 2;
-    }
 
     set_global_num();
     i32 num1 = global_num;
@@ -44,6 +38,19 @@ i32 fun(i32[3] a, i32 b, @(i32) c, i32[4][3][2] e, i8[3] g) {
 
     i32[9] h = [[1, 2, 3, 4, 5, 6, 7, 8, 9]];
     printf("h: [[%d, %d, %d, %d, %d, %d, %d, %d, %d]]\r\n", h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], h[8]);
+
+    i8[6] buf = empty;
+    getl(@buf, 6);
+    i32 num = atoi(@buf);
+
+    i32 output = num > 10;
+    printf("num > 10: %d\r\n", output);
+
+    if num > 10 {
+        printf("The number was greater than 10\r\n");
+    } else {
+        printf("The number was not greater than 10\r\n");
+    }
 
     return 1;
 }
@@ -57,18 +64,10 @@ void set_global_num() {
 }
 
 i16 main() {
-    i8[6] buf = empty;
-    getl(@buf, 6);
-    i32 num = atoi(@buf);
-
-    i32 output = num > 10;
-    printf("num > 10: %d\r\n", output);
-
-    if num > 10 {
-        printf("The number was greater than 10\r\n");
-    } else {
-        printf("The number was not greater than 10\r\n");
-    }
+    printf("sp: %p \r\n");
+    printf("sp: %p \r\n");
+    printf("sp: %p \r\n");
+    printf("sp: %p \r\n");
 
     return 0;
 }

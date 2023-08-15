@@ -765,6 +765,7 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
     // Check if it's a function call
     match env.global_funcs.get(&id) {
         Some(sig) => {
+            let mut gained_height: StackHeight = 0;
             let args = &sig.args;
             if args.len() != offsets.len() {
                 warn!("Function signature for {} has {} arguments but {} were given", id, args.len(), offsets.len());
@@ -777,12 +778,13 @@ pub fn call_func(id: String, offsets: Vec<Expr>, range: Range<usize>, instrs: &m
                     warn!("Type used for {}th argument: {}", i, tt);
                     tt
                 };
+                gained_height += tt.get_size(env, Some(&range))? as StackHeight;
                 let plan = ReturnPlan::Push(tt);
                 compile_expr(offset, plan, instrs, fienv, env)?;
             }
             let instr = InterInstr::Save(fienv.get_active_temps(), range.to_owned());
             instrs.push(instr);
-            let instr = InterInstr::Call(id.clone(), range.to_owned());
+            let instr = InterInstr::Call(id.clone(), gained_height, range.to_owned());
             instrs.push(instr);
             let instr = InterInstr::Load(fienv.get_active_temps(), range.to_owned());
             instrs.push(instr);

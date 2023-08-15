@@ -184,8 +184,12 @@ pub fn compile_load_iinstr(temps: &[ADTemp], _range: Range<usize>, instrs: &mut 
     Ok(())
 }
 
-pub fn compile_call_iinstr(name: String, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, _fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
+pub fn compile_call_iinstr(name: String, inc: StackHeight, _range: Range<usize>, instrs: &mut Vec<ValidInstruction>, _fenv: &mut FunctionEnvironment) -> Result<(), BudErr> {
     let instr = Jsr(name).validate()?;
+    instrs.push(instr);
+    let from = AddrMode::AIndDisp(inc.into(), AReg::SP);
+    let to = AReg::SP.into();
+    let instr = Lea(from, to).validate()?;
     instrs.push(instr);
     Ok(())
 }

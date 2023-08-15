@@ -14,32 +14,31 @@ use super::place::*;
 #[derive(Debug)]
 pub enum InterInstr {
     // Data operations
-    Binop(Place, BudBinop, Place, Range<usize>),    // Dest. on right (SUB subtracts src from dest. and stores in dest.; DIV, too)
+    Binop(Place, BudBinop, Place, Range<usize>),                // Dest. on right (SUB subtracts src from dest. and stores in dest.; DIV, too)
     Binopi(Imm, BudBinop, Place, Range<usize>),
-    Neg(Place, Range<usize>),                                 // Neg and Bnot must not be an ATemp
-    Bnot(Place, Range<usize>),                                // Boolean NOT--not bitwise NOT
+    Neg(Place, Range<usize>),                                   // Neg and Bnot must not be an ATemp
+    Bnot(Place, Range<usize>),                                  // Boolean NOT--not bitwise NOT
     Move(Place, Place, Range<usize>),
-    MoVA(String, Place, Range<usize>),                        // Move Var Address
+    MoVA(String, Place, Range<usize>),                          // Move Var Address
     Movi(Imm, Place, Range<usize>),
-    Movs(usize, Place, Range<usize>),                         // Move string literal (by the string literal's global label)
-    Lea(ATemp, Option<DTemp>, i32, ATemp, Range<usize>),      // Load effective address into an address register
-    IncSP(StackHeight, Range<usize>),                                 // Add the value to SP
+    Movs(usize, Place, Range<usize>),                           // Move string literal (by the string literal's global label)
+    Lea(ATemp, Option<DTemp>, i32, ATemp, Range<usize>),        // Load effective address into an address register
+    IncSP(StackHeight, Range<usize>),                           // Add the value to SP
     Push(Place, Range<usize>),
     PuVA(String, Range<usize>),
     Pusi(Imm, DataSize, Range<usize>),
-    Puss(usize, Range<usize>),                                // Push string literal (by the string literal's global label)
-    Pea(ATemp, Option<DTemp>, i32, Range<usize>),             // Push effective address onto stack
+    Puss(usize, Range<usize>),                                  // Push string literal (by the string literal's global label)
+    Pea(ATemp, Option<DTemp>, i32, Range<usize>),               // Push effective address onto stack
     Chk(ATemp, Option<DTemp>, i32, DTemp, Range<usize>),
     Chki(i16, DTemp, Range<usize>),
 
     // Stack frame operations
-    // SMarker(StackMarker, Range<usize>),                       // Marks a stack location for the FunctionInterEnvironment
-    // Grs(RegisterSpaceLbl, Range<usize>),                      // GetRegisterSpace - allocate space on the stack to save active regs
-    Save(Box<[ADTemp]>, Range<usize>),       // Save all active regs by moving them to the given RegisterSpace
-    // Call(String, StackMarker, Range<usize>),                  // Jsr to function, then move the SP to where it was when the StackMarker
-                                                // instruction was encountered and retrieve reg values from most recent Grs
-    Call(String, Range<usize>),
-    Load(Box<[ADTemp]>, Range<usize>),      // Pop regs from stack using movem 
+    // SMarker(StackMarker, Range<usize>),                      // Marks a stack location for the FunctionInterEnvironment
+    // Grs(RegisterSpaceLbl, Range<usize>),                     // GetRegisterSpace - allocate space on the stack to save active regs
+    Save(Box<[ADTemp]>, Range<usize>),                          // Save all active regs by moving them to the given RegisterSpace
+                                                                // instruction was encountered and retrieve reg values from most recent Grs
+    Call(String, StackHeight, Range<usize>),                    // Jsr into a function, then add the given StackHeight to the SP
+    Load(Box<[ADTemp]>, Range<usize>),                          // Pop regs from stack using movem 
 
     Lbl(usize, Range<usize>),
     Goto(usize, Range<usize>),
@@ -47,7 +46,7 @@ pub enum InterInstr {
 
     // Logic operations
     Tst(Place, Range<usize>),
-    Tsti(Imm, Range<usize>),                                  // Pre-calculate the CC and just move that to the CC using `MOVE <ea>, CCR`
+    Tsti(Imm, Range<usize>),                                    // Pre-calculate the CC and just move that to the CC using `MOVE <ea>, CCR`
     Bcc(usize, Range<usize>),
     Bcs(usize, Range<usize>),
     Beq(usize, Range<usize>),
