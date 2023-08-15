@@ -16,7 +16,7 @@
 
 use std::ops::Range;
 
-use crate::{bud::*, m68k::*, error::*, u_err, c_err_opt};
+use crate::{bud::*, m68k::*, error::*, u_err};
 
 use super::{fienv::*, place::*, inter_instr::*};
 
@@ -162,12 +162,7 @@ impl Environment {
 
 impl TypeType {
     pub fn get_size(&self, env: &Environment, range: Option<&Range<usize>>) -> Result<u32, CompilerErr> {
-        match env.types.get(self) {
-            Some(typ) => match typ.size {
-                Either::This(size) | Either::That((size, _)) => Ok(size)
-            }
-            None => c_err_opt!(range, "Type {} not found", self)
-        }
+        Ok(env.tt_size(self.clone(), range)?)
     }
     // Returns None if the size is not a Byte, Word, or LWord
     pub fn get_data_size(&self, env: &Environment, range: Option<&Range<usize>>) -> Result<Option<DataSize>, CompilerErr> {
@@ -179,14 +174,8 @@ impl TypeType {
             _ => Ok(None),
         }
     }
-    pub fn is_magic(&self, env: &Environment) -> bool {
-        match env.types.get(self) {
-            Some(t) => t.magic,
-            None => {
-                error!("Type {} not found in env.types", self);
-                panic!()
-            }
-        }
+    pub fn is_magic(&self, env: &Environment) -> Result<bool, CompilerErr> {
+        Ok(env.tt_is_magic(self.clone(), None)?)
     }
     pub fn is_struct(&self) -> bool {
         matches!(self, TypeType::Struct(_, _))

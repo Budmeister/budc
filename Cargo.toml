@@ -11,3 +11,4 @@ logos = "0"
 colored = "2"
 proc_macros = { path = "proc_macros" }
 log = "*"
+itertools = "*"

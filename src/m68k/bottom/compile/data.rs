@@ -72,7 +72,7 @@ pub fn compile_move_iinstr(
     let mut dest_size = dest_tt.get_size(env, Some(&range))?;
     let dest_data_size = dest_tt.get_data_size(env, Some(&range))?;
     if src_size < dest_size {
-        if dest_tt.is_magic(env) || dest_tt.is_pointer() {
+        if dest_tt.is_magic(env)? || dest_tt.is_pointer() {
             let (src, _) = extend_efficient(
                 src,
                 src_data_size.unwrap(),

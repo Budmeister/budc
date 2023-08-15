@@ -46,7 +46,7 @@ pub fn compile_bin_expr(be: BinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIns
                 },
                 (ReturnPlan::Condition, _, _) => {
                     let preference = nbe.type_preference(fienv, env)?;
-                    if !preference.is_magic(env) {
+                    if !preference.is_magic(env)? {
                         return u_err!(nbe.get_range(), "Cannot read type {} as a condition, because it is not magic", preference);
                     }
                     let dtemp = fienv.get_data_temp(preference.clone(), Some(nbe.get_range_owned()))?;
@@ -317,9 +317,7 @@ pub fn get_reference(nbe: NonBinExpr, plan: ReturnPlan, instrs: &mut Vec<InterIn
                         Ok(())
                     }
                     ReturnPlan::Push(tt) => {
-                        if tt != field.tt {
-                            return u_err!(range, "Cannot convert {} to {}", field.tt, tt);
-                        }
+                        env.tt_converts_to(TypeType::Pointer(Box::new(field.tt)), tt, Some(&range))?;
                         let instr = InterInstr::PuVA(field.name, range);
                         instrs.push(instr);
                         Ok(())
@@ -487,7 +485,7 @@ pub fn compile_unary_expr(un: BudUnop, nbe: NonBinExpr, plan: ReturnPlan, instrs
     }
     let range = nbe.get_range_owned();
     if let Some(tt) = &tt {
-        if !tt.is_magic(env) {
+        if !tt.is_magic(env)? {
             return u_err!(range, "Cannot return non-magic type {} from unary operator {}", tt, un);
         }
     }

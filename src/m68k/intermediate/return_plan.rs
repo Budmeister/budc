@@ -17,8 +17,6 @@ use crate::{bud::BudBinop, error::*, m68k::*, u_err, c_err};
 
 use super::{inter_instr::*, fienv::FunctionInterEnvironment};
 
-use log::*;
-
 /// `ReturnPlan`s tell an expression where to put its output. 
 /// `ReturnPlan`s are not required to set the condition codes accordingly
 /// except for the `Condition` variant.
@@ -51,16 +49,14 @@ impl ReturnPlan {
     /// Also frees this place. If self is `Return`, also adds `Rts` instruction
     pub fn into_inter_instr(self, from: Place, range: Range<usize>, instrs: &mut Vec<InterInstr>, fienv: &mut FunctionInterEnvironment, env: &Environment) -> Result<(), BudErr> {
         let from_tt = from.get_type();
-        let from_tt_size = from_tt.get_size(env, Some(&range))?;
         let to_tt;
-        let to_tt_size;
         match self {
             ReturnPlan::Binop(b, to) => {
                 to_tt = to.get_type();
-                if !to.is_magic(env) {
+                if !to.is_magic(env)? {
                     return u_err!(range, "Cannot do binary operator {} on non-magic type {}", b, to.get_type());
                 }
-                if !from.is_magic(env) {
+                if !from.is_magic(env)? {
                     return u_err!(range, "Cannot do binary operator {} on non-magic type {}", b, from.get_type());
                 }
                 let instr = InterInstr::Binop(from.clone(), b, to, range.to_owned());
@@ -94,14 +90,7 @@ impl ReturnPlan {
                 return Ok(());
             },
         }
-        to_tt_size = to_tt.get_size(env, Some(&range))?;
-        if from_tt != to_tt {
-            if from_tt.get_size(env, Some(&range))? == to_tt.get_size(env, Some(&range))? {
-                warn!("Implicit cast between equally sized types: {} -> {}", from_tt, to_tt);
-            } else {
-                return u_err!(range, "Implicit cast between unequally sized types: {} -> {} ({} -> {})", from_tt, to_tt, from_tt_size, to_tt_size);
-            }
-        }
+        env.tt_converts_to(from_tt, to_tt, Some(&range))?;
         Ok(())
     }
     /// Has no effect if there is no return plan
@@ -131,7 +120,7 @@ impl ReturnPlan {
         Ok(())
     }
     fn get_imm_size(from: Imm, tt: TypeType, range: Range<usize>, env: &Environment) -> Result<DataSize, BudErr> {
-        if !tt.is_magic(env) {
+        if !tt.is_magic(env)? {
             return u_err!(range, "Cannot coerce immediate value {} to non-magic type {}", from, tt);
         }
         match tt.get_data_size(env, Some(&range))? {

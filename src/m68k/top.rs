@@ -5,10 +5,10 @@
 //! Year:       2023
 
 use std::collections::{HashMap, HashSet};
-use std::ops::RangeFrom;
+use std::ops::{RangeFrom, Range};
 
 use crate::bud::{BinExpr, Expr, NonBinExpr, TypeExpr, VarDecl, Item};
-use crate::{error::*, u_erru, c_erru};
+use crate::{error::*, u_erru, c_erru, u_err_opt, c_erru_opt};
 use crate::logging::LoggingOptions;
 use crate::tools::ToStringCollection;
 use crate::{u_err, c_err};
@@ -32,7 +32,7 @@ impl BudExpander {
                 Environment::get_void_tt(),
                 Type {
                     size: Either::This(0),
-                    typtyp: Environment::get_void_tt(),
+                    tt: Environment::get_void_tt(),
                     magic: false,
                 }
             ),
@@ -40,7 +40,7 @@ impl BudExpander {
                 TypeType::Pointer(Box::new(Environment::get_void_tt())),
                 Type {
                     size: Either::This(Self::REG_SIZE),
-                    typtyp: TypeType::Pointer(Box::new(Environment::get_void_tt())),
+                    tt: TypeType::Pointer(Box::new(Environment::get_void_tt())),
                     magic: false,
                 }
             ),
@@ -48,7 +48,7 @@ impl BudExpander {
                 TypeType::Id("i8".to_owned()),
                 Type {
                     size: Either::This(1),
-                    typtyp: TypeType::Id("i8".to_owned()),
+                    tt: TypeType::Id("i8".to_owned()),
                     magic: true,
                 },
             ),
@@ -56,7 +56,7 @@ impl BudExpander {
                 TypeType::Id("i16".to_owned()),
                 Type {
                     size: Either::This(2),
-                    typtyp: TypeType::Id("i16".to_owned()),
+                    tt: TypeType::Id("i16".to_owned()),
                     magic: true,
                 },
             ),
@@ -64,7 +64,7 @@ impl BudExpander {
                 TypeType::Id("i32".to_owned()),
                 Type {
                     size: Either::This(4),
-                    typtyp: TypeType::Id("i32".to_owned()),
+                    tt: TypeType::Id("i32".to_owned()),
                     magic: true,
                 },
             ),
@@ -144,7 +144,7 @@ impl BudExpander {
             NonBinExpr::LitExpr(lit, _) => {
                 match lit {
                     bud::Literal::Num(_) => { TypeType::Id("i32".to_owned()).add_subtypes(types); },
-                    bud::Literal::Str(_) => { TypeType::Pointer(Box::new(TypeType::Id("u8".to_owned()))).add_subtypes(types); },
+                    bud::Literal::Str(_) => { Environment::get_str_tt().add_subtypes(types); },
                 }
                 Ok(())
             }
@@ -343,7 +343,7 @@ impl BudExpander {
         // Compile all funcs
         let mut label_gen = Some(0..);
         for (name, func) in funcs {
-            match func.compile(label_gen.unwrap_or_else(|| 0..), log_options, &environment) {
+            match func.compile(label_gen.unwrap_or_else(|| 0..), log_options, &mut environment) {
                 Ok((cfunc, label_gen_)) => {
                     environment.compiled_funcs.push(cfunc);
                     label_gen = Some(label_gen_);
@@ -366,7 +366,7 @@ impl BudExpander {
 }
 
 
-type TypeSize = Either<u32, (u32, HashMap<String, (u32, TypeType)>)>;   // Choice<size, (size_of_struct, HashMap<field_name, (field_offset, field_type)>)>
+type TypeSize = Either<u32, (u32, HashMap<String, (u32, TypeType)>)>;   // Either<size, (size_of_struct, HashMap<field_name, (field_offset, field_type)>)>
 impl TypeSize {
     fn get_mag(&self) -> u32 {
         let (Either::This(size) | Either::That((size, _))) = self;
@@ -413,7 +413,7 @@ impl TypeSizeGenerator {
     }
     fn from_type(typ: &Type) -> TypeSizeGenerator {
         TypeSizeGenerator {
-            tt: typ.typtyp.clone(),
+            tt: typ.tt.clone(),
             state: TypeSizeState::Calculated(typ.size.clone()),
         }
     }
@@ -508,8 +508,21 @@ impl TypeSizeGenerator {
     }
 }
 
+/// Even if a type hasn't been gathered at the beginning,
+/// some information can be gotten if it's a pointer
+enum TypeExists<'env, 'tt> {
+    Exists(&'env Type),
+    Pointer(&'tt TypeType),
+    DoesntExist,
+}
+impl<'env, 'tt> TypeExists<'env, 'tt> {
+    fn doesnt_exist_err(tt: &TypeType, range: Option<&Range<usize>>) -> CompilerErr {
+        c_erru_opt!(range, "Type {} does not exist and is not a pointer", tt)
+    }
+}
+
 pub struct Environment {
-    pub types: HashMap<TypeType, Type>,             // Give me a TypeType, and I'll give you a Type
+    types: HashMap<TypeType, Type>,             // Give me a TypeType, and I'll give you a Type
     pub structs: HashMap<String, TypeType>,         // Give me a struct name, and I'll give you the TypeType for that struct
     pub global_funcs: HashMap<String, Signature>,   // Give me a funciton name, and I'll give you the signature
     pub global_vars: HashMap<String, GlobalVar>,
@@ -575,7 +588,7 @@ impl Environment {
             .iter()
             .map(|tt| (tt.clone(), TypeSizeGenerator::new(tt.clone())))
             .chain(
-                built_in.values().map(|typ| (typ.typtyp.clone(), TypeSizeGenerator::from_type(typ))),
+                built_in.values().map(|typ| (typ.tt.clone(), TypeSizeGenerator::from_type(typ))),
             )
             .chain(
                 types_in_functions
@@ -620,7 +633,7 @@ impl Environment {
                             tt.clone(),
                             Type {
                                 size,
-                                typtyp: tt,
+                                tt,
                                 magic: false,
                             },
                         ))
@@ -704,6 +717,79 @@ impl Environment {
     pub fn get_global_var(&self, name: &str) -> Option<&GlobalVar> {
         self.global_vars.get(name)
     }
+
+    pub fn tt_converts_to(&self, from: TypeType, to: TypeType, range: Option<&Range<usize>>) -> Result<(), BudErr> {
+        if from == to {
+            return Ok(());
+        }
+        let from_size = from.get_size(self, range)?;
+        let to_size = to.get_size(self, range)?;
+        if from_size == to_size {
+            use TypeType::*;
+            if let (Pointer(from1), Pointer(to1))  = (&from, &to) {
+                // You can convert from @(T[n]) to @(T) without warning
+                if Self::is_array_of(&from1, &to1) {
+                    return Ok(());
+                }
+                // You can convert from @(T) to @(T[n]) without warning
+                if Self::is_array_of(&to1, from1) {
+                    return Ok(());
+                }
+            }
+
+            warn!("Implicit cast between equally sized types: {} -> {}", from, to);
+            return Ok(());
+        }
+        return u_err_opt!(range, "Implicit cast between unequally sized types: {} -> {} ({} -> {})", from, to, from_size, to_size);
+    }
+    
+    pub fn tt_is_magic(&self, tt: TypeType, range: Option<&Range<usize>>) -> Result<bool, CompilerErr> {
+        match self.get_type(&tt) {
+            TypeExists::Exists(typ) => Ok(typ.is_magic()),
+            TypeExists::Pointer(_) => Self::get_str_tt().is_magic(self),
+            TypeExists::DoesntExist => Err(TypeExists::doesnt_exist_err(&tt, range)),
+        }
+    }
+
+    pub fn tt_size(&self, tt: TypeType, range: Option<&Range<usize>>) -> Result<u32, CompilerErr> {
+        match self.get_type(&tt) {
+            TypeExists::Exists(typ) => Ok(typ.get_size()),
+            TypeExists::Pointer(_) => Ok(BudExpander::REG_SIZE),
+            TypeExists::DoesntExist => Err(TypeExists::doesnt_exist_err(&tt, range)),
+        }
+    }
+
+    /// If the type is a Struct, then this function will return 
+    /// `That<(size_of_struct, HashMap<field_name, (field_offset, field_type)>)>.`
+    /// If you only need the magnitude of the size, use `env.tt_size()` instead
+    pub fn type_size(&self, tt: TypeType, range: Option<&Range<usize>>) -> Result<&TypeSize, CompilerErr> {
+        match self.get_type(&tt) {
+            TypeExists::Exists(typ) => Ok(&typ.size),
+            TypeExists::Pointer(_) => Ok(&Either::This(BudExpander::REG_SIZE)),
+            TypeExists::DoesntExist => Err(TypeExists::doesnt_exist_err(&tt, range)),
+        }
+    }
+
+    fn get_type<'env, 'tt>(&'env self, tt: &'tt TypeType) -> TypeExists<'env, 'tt>
+    {
+        if let Some(typ) = self.types.get(tt) {
+            return TypeExists::Exists(typ);
+        }
+        if let TypeType::Pointer(tt) = tt {
+            return TypeExists::Pointer(&tt);
+        }
+        return TypeExists::DoesntExist;
+    }
+
+    fn is_array_of(tt: &TypeType, base: &TypeType) -> bool {
+        if tt == base {
+            return true;
+        }
+        if let TypeType::Array(tt, _) = tt {
+            return Self::is_array_of(tt, base);
+        }
+        false
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -735,7 +821,7 @@ pub struct CompiledEnvironment {
 #[derive(Eq, PartialEq)]
 pub struct Type {
     pub size: TypeSize,
-    pub typtyp: TypeType,
+    pub tt: TypeType,
     pub magic: bool,
 }
 impl Type {
@@ -744,10 +830,13 @@ impl Type {
             Either::This(size) | Either::That((size, _)) => size
         }
     }
+    pub fn is_magic(&self) -> bool {
+        self.magic
+    }
 }
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<{}, {}{}>", self.typtyp.name(), match self.size {
+        write!(f, "<{}, {}{}>", self.tt.name(), match self.size {
             Either::This(size) => size.to_string(),
             Either::That((size, _)) => size.to_string(),
         }, if self.magic { ", magic" } else { "" })
@@ -910,7 +999,7 @@ impl Function {
             expr: expr.into(),
         }
     }
-    pub fn compile(self, label_gen: RangeFrom<usize>, log_options: &LoggingOptions, env: &Environment) -> Result<(CompiledFunction, RangeFrom<usize>), BudErr> {
+    pub fn compile(self, label_gen: RangeFrom<usize>, log_options: &LoggingOptions, env: &mut Environment) -> Result<(CompiledFunction, RangeFrom<usize>), BudErr> {
         match self.expr {
             FuncData::Local(expr) => {
                 let (instrs, fienv) = get_inter_instrs(expr, &self.signature, label_gen, log_options, env)?;

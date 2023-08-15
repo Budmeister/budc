@@ -137,10 +137,7 @@ impl Place {
                 let f_name = &fields[off as usize].name;
                 let tt_ = fields[off as usize].tt.clone();
                 let s_tt = self.get_type();
-                let size = match env.types.get(&s_tt) {
-                    Some(t) => t.size.clone(),
-                    None => return u_err!(range, "Struct type not found in environment: {}", name),
-                };
+                let size = env.type_size(s_tt, Some(&range))?;
                 if let Either::That((_, layout)) = size {
                     off = match layout.get(f_name) {
                         Some((off, _)) => *off as i32,
@@ -246,15 +243,8 @@ impl Place {
             Place::Var(_) => {}
         }
     }
-    pub fn is_magic(&self, env: &Environment) -> bool {
-        let tt = self.get_type();
-        match env.types.get(&tt) {
-            Some(t) => t.magic,
-            None => {
-                error!("Type {} not found in env.types", tt);
-                panic!()
-            }
-        }
+    pub fn is_magic(&self, env: &Environment) -> Result<bool, CompilerErr> {
+        self.get_type().is_magic(env)
     }
     pub fn is_struct(&self) -> bool {
         self.get_type().is_struct()
