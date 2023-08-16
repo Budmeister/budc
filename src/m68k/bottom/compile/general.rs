@@ -243,6 +243,96 @@ pub fn extend_efficient(
         Ok((dreg.into(), live))
     }
 }
+/// If `to == from`, addr_mode will be returned.
+/// 
+/// If `to > from`, an extension will occur.
+/// 
+/// If `from > to`, then the behavior will depend on the type of `AddrMode`. The more significant
+/// bits, which are stored at lower addresses, will be thrown out. The address will need to be 
+/// moved up by 1, 2, or 3 (`delta`) depending on `from` and `to`. In some cases (*), instructions
+/// will be executed to make the change. Auto-increment or -decrement will be lost.
+/// * `D(_)`: No change
+/// * `A(_)`: No change
+/// * `AInd(areg)`: `AIndDisp(Num(delta), areg)`
+/// * `AIndInc(areg)`: `AIndDisp(Num(delta), areg)`
+/// * `AIndDec(areg)`: `AIndDisp(Num(delta), areg)`
+/// * `AIndDisp(num_or_lbl, AReg)`: *depending on variant of num_or_lbl `AIndDisp(Num, n)`
+/// * `AIndIdxDisp(num_or_lbl, areg, reg)`: *depending on variant of num_or_lbl `AIndDisp(Num, n)`
+/// * `AbsW(num: i16)`: `AbsW(num + delta)`
+/// * `AbsL(num_or_lbl)`: *`AInd(n)`
+/// * `Imm(_)`: No change
+/// 
+/// The returned bool indicates if the AddrMode is live. 
+/// 
+/// 
+pub fn ensure_size(
+    addr_mode: AddrMode,
+    from: DataSize,
+    to: DataSize,
+    instrs: &mut Vec<ValidInstruction>,
+    fenv: &mut FunctionEnvironment,
+    n: Proxy,
+) -> Result<(AddrMode, bool), CompilerErr> {
+    use std::cmp::Ordering::*;
+    use DataSize::*;
+    use AddrMode::*;
+
+    match from.cmp(&to) {
+        Less => {
+            let (dreg, live) = fenv.addr_mode_to_dreg(addr_mode, from, instrs, n)?;
+            extend(dreg, from, to, instrs)?;
+            Ok((dreg.into(), live))
+        },
+        Equal => Ok((addr_mode, true)),
+        Greater => {
+            let delta = match (from, to) {
+                (LWord, Word) => 2,
+                (LWord, Byte) => 3,
+                (Word, Byte) => 1,
+                _ => panic!(),
+            };
+            match addr_mode {
+                D(_) |
+                A(_) |
+                Imm(_) => Ok((addr_mode, true)),
+                AInd(areg) => Ok((AIndDisp(delta.into(), areg), true)),
+                AIndInc(areg) |
+                AIndDec(areg) => Ok((AIndDisp(delta.into(), areg), true)),
+                AIndDisp(ref num_or_lbl, areg) => {
+                    if let NumOrLbl::Num(num) = num_or_lbl {
+                        Ok((AIndDisp((*num + delta).into(), areg), true))
+                    } else {
+                        let instr = Instruction::Lea(addr_mode, n.into()).validate()?;
+                        instrs.push(instr);
+                        // Still live because it's a pointer
+                        Ok((AIndDisp(delta.into(), n.into()), true))
+                    }
+                }
+                AIndIdxDisp(ref num_or_lbl, areg, idx) =>{
+                    if let NumOrLbl::Num(num) = num_or_lbl {
+                        Ok((AIndIdxDisp((*num + delta).into(), areg, idx), true))
+                    } else {
+                        let instr = Instruction::Lea(addr_mode, n.into()).validate()?;
+                        instrs.push(instr);
+                        // Still live because it's a pointer
+                        Ok((AIndDisp(delta.into(), n.into()), true))
+                    }
+                }
+                AbsW(num) => Ok((AbsW(num + delta as i16), true)),
+                AbsL(ref num_or_lbl) => {
+                    if let NumOrLbl::Num(num) = num_or_lbl {
+                        Ok((AbsL((*num + delta).into()), true))
+                    } else {
+                        let instr = Instruction::Lea(addr_mode, n.into()).validate()?;
+                        instrs.push(instr);
+                        // Still live because it's a pointer
+                        Ok((AIndDisp(delta.into(), n.into()), true))
+                    }
+                }
+            }
+        },
+    }
+}
 pub fn compile_iinstr(
     iinstr: InterInstr,
     instrs: &mut Vec<ValidInstruction>,

@@ -68,16 +68,17 @@ fn compile_times(src: Place, dest: Place, size_src: DataSize, size_dest: DataSiz
         warn!("Multiplication on 32 bit integers will cast to 16 bit integers")
     }
     let src = fenv.place_to_addr_mode(src, range.to_owned(), instrs, env, Proxy1)?;
+    let (src, _) = ensure_size(src, size_src, DataSize::Word, instrs, fenv, Proxy1)?;
     // Times needs to go to a dreg
     let (dest_dreg, live) =
         fenv.place_to_dreg(dest.clone(), range.to_owned(), instrs, env, Proxy2)?;
+    extend(dest_dreg, size_dest, DataSize::Word, instrs)?;
     let instr = Muls(src, dest_dreg).validate()?;
     instrs.push(instr);
     if !live {
         let dest_real = fenv.place_to_addr_mode(dest, range, instrs, env, Proxy1)?;
         let dest_dead = AddrMode::D(dest_dreg);
-        let size = DataSize::Word;
-        let instr = Move(size, dest_dead, dest_real).validate()?;
+        let instr = Move(size_dest, dest_dead, dest_real).validate()?;
         instrs.push(instr);
     }
     Ok(())
