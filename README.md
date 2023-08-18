@@ -51,6 +51,7 @@ extern {
    * `T == void`
    * `F == T[_][_]...`
    * `T == F[_][_]...`
+3. Arrays: Array literals are written like `[[1, 2, 3, 4]]` and can be used anywhere (not just at the time of assignment) as an expression.
 
 ## Tested Features
 1. `printf` (and therefore `extern`)
@@ -66,8 +67,9 @@ extern {
 1. Division
 2. Automatic bounds checking
 3. I know that structs currently do not work
+4. 2-D array literals
 
-## Un-implemented Features
+## Un-implemented/Partially Implemented Features
 1. Importing a Bud file. The item, `import ./path/to/file.bud;` should parse that file and include all its functions and global variables as extern in this file.
 2. Returning arrays or structs from a function
 3. Explicit casting
