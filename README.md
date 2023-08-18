@@ -31,7 +31,7 @@ i32[4][3] a;
 ```
   The reasoning goes, _you start with an `i32`; add `[4]` to make it an array of 4 `i32`s. Then add `[3]` to make it an array of 3 arrays of 4 `i32`s._
 
-3. There are two ways to index into an array. If you use square brackets, `a[2]`, there will be no runtime bounds-checks, as in C. But if you use round brackets (yes that's what they're called), `a(2)`, there will be a runtime bounds-check where 68k-bounds-check exception will occur if the index is out of bounds. If you index with a literal int that is out of bounds, then if you used square brackets, you will get a compile-time warning, and if you used round brackets, you will get a compile-time error.
+3. There are two ways to index into an array. If you use square brackets, `a[2]`, there will be no runtime bounds-checks, as in C. But if you use round brackets, `a(2)` (yes that's what they're called), there will be a runtime bounds-check where 68k-bounds-check exception will occur if the index is out of bounds. If you index with a literal int that is out of bounds, then if you used square brackets, you will get a compile-time warning, and if you used round brackets, you will get a compile-time error.
 4. If I had finished implementing structs, you would have indexed into them like this: `my_struct[fieldname]`. This is just because structs feel a lot like arrays that can return different types.
 5. There are no local scopes. All local variables exist for the duration of the function.
 6. There is no order of operations. All binary operators are carried out left-to-right.
@@ -68,7 +68,7 @@ extern {
 3. I know that structs currently do not work
 
 ## Un-implemented Features
-1. `import`ing a Bud file. The item, `import ./path/to/file.bud;` should parse that file and include all its functions and global variables as extern in this file.
+1. Importing a Bud file. The item, `import ./path/to/file.bud;` should parse that file and include all its functions and global variables as extern in this file.
 2. Returning arrays or structs from a function
 3. Explicit casting
 4. Comments
