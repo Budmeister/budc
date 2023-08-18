@@ -92,8 +92,12 @@ void sub_by_ref(@(i32) term1, @(i32) term2, @(i32) sum) {
     *sum = *term1 - *term2;
 }
 
+i32 my_fun() {
+    10
+}
+
 i16 main() {
-    i32 fact1 = 5;
+    i32 fact1 = my_fun();
     i32 fact2 = 5;
     i32 prod = fact1 * fact2;
 

@@ -162,7 +162,7 @@ impl Place {
                 }
             } else if checked {
                 let tt = TypeType::Id("i16".to_owned());
-                let dtemp = fienv.get_data_temp(tt.clone(), Some(range.to_owned()))?;
+                let dtemp = fienv.get_data_temp(tt.clone(), Some(&range))?;
                 let d_place = Place::DTemp(dtemp, tt);
                 let instr = InterInstr::Move(self.clone(), d_place.clone(), range.to_owned());
                 instrs.push(instr);

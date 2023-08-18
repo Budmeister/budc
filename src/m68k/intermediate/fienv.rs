@@ -58,7 +58,7 @@ impl FunctionInterEnvironment {
             cleanup_expr_created: false,
             loop_stack: Vec::new(),
             label_gen,
-            dtemps: Vec::new(),
+            dtemps: vec![true],
             atemps: Vec::new(),
         }
     }
@@ -72,7 +72,7 @@ impl FunctionInterEnvironment {
     /// Data temps compile to data registers, so this function fails if the given type is a large type (size > 4 bytes).
     /// Arrays and structs cannot be stored in data registers, either, so this function will fail if the given type array or struct.
     /// However, it is not the case that only magic types can be stored in data temps, since pointers are not magic.
-    pub fn get_data_temp(&mut self, tt: TypeType, range: Option<Range<usize>>) -> Result<usize, CompilerErr> {
+    pub fn get_data_temp(&mut self, tt: TypeType, range: Option<&Range<usize>>) -> Result<usize, CompilerErr> {
         if tt.is_array() || tt.is_struct() {
             return c_err_opt!(range, "Cannot store arrays or structs in data temps. TypeType {} given", tt);
         }
@@ -109,6 +109,10 @@ impl FunctionInterEnvironment {
         }
     }
     pub fn free_data_temp(&mut self, dtemp: DTemp) {
+        if dtemp == 0 {
+            // 0 is the return DTemp
+            return;
+        }
         Self::_free_temp(&mut self.dtemps, dtemp, "D")
     }
     pub fn free_addr_temp(&mut self, atemp: ATemp) {

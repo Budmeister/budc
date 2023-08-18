@@ -31,7 +31,7 @@ pub fn get_inter_instrs(expr: Expr, signature: &Signature, label_gen: RangeFrom<
         // Do this by calling `fienv.ret(place, instrs)`
         plan = ReturnPlan::None;
     } else {
-        plan = ReturnPlan::Move(Place::DTemp(0, signature.name.tt.clone()));
+        plan = ReturnPlan::Return;
     }
     let range = expr.get_range_owned();
     compile::compile_expr(
@@ -47,7 +47,7 @@ pub fn get_inter_instrs(expr: Expr, signature: &Signature, label_gen: RangeFrom<
             instrs.push(instr);
         }
     }
-    if signature.name.tt == Environment::get_void_tt() {
+    if signature.name.tt.is_void() {
         let instr = InterInstr::Rts(range);
         instrs.push(instr);
     }

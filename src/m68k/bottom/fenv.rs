@@ -328,6 +328,9 @@ impl FunctionEnvironment {
                         }
                     }
                     ADTemp::D(dtemp) => {
+                        if *dtemp == 0 {
+                            return None;
+                        }
                         if self.dtemp_is_dreg(*dtemp) {
                             Some((|| Ok(D(self.dtemp_as_dreg(*dtemp, &mut dummy_instrs, n)?.0)))())
                         } else {
