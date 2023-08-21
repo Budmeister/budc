@@ -8,7 +8,7 @@ use std::ops::RangeFrom;
 
 use crate::{m68k::*, bud::*, error::*, logging::LoggingOptions};
 
-use super::{return_plan::ReturnPlan, inter_instr::InterInstr, fienv::FunctionInterEnvironment, place::Place};
+use super::{return_plan::ReturnPlan, inter_instr::InterInstr, fienv::FunctionInterEnvironment};
 
 use log::*;
 
