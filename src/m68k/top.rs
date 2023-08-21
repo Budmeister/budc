@@ -253,10 +253,12 @@ impl BudExpander {
             .into_iter()
             .filter_map(|item| {
                 match item {
-                    Item::ExternFunc(_, _, ref range) |
-                    Item::ExternBlock(_, ref range) => {
-                        errors.push((u_erru!(range, "Extern items should use the extern keyword"), None));
+                    Item::ExternFunc(_, _, _) => {
                         externs.push(item);
+                        None
+                    }
+                    Item::ExternBlock(mut items, _) => {
+                        externs.append(&mut items);
                         None
                     }
                     Item::ExternItem(item, _) => {

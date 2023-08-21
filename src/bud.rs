@@ -751,24 +751,31 @@ impl Item {
                 _ => invalid!(range, N::ExternFunc, children)
             }
             // I -> Ex
-            [Node::Tm {
-                t: T::Extern,
+            [Node::NonTm {
+                n: N::ExternBlock,
+                children,
                 range,
-            }, Node::Tm {
-                t: T::LeftSquiggly,
-                range: _
-            }, Node::NonTm {
-                n: N::Items,
-                children: items,
-                range: irange
-            }, Node::Tm {
-                t: T::RightSquiggly,
-                range: _
-            }] => Ok(Item::ExternBlock(Item::news(
-                items,
-                irange.to_owned())?,
-                range.to_owned())
-            ),
+            }] => match &children[..] {
+                [Node::Tm {
+                    t: T::Extern,
+                    range,
+                }, Node::Tm {
+                    t: T::LeftSquiggly,
+                    range: _
+                }, Node::NonTm {
+                    n: N::Items,
+                    children: items,
+                    range: irange
+                }, Node::Tm {
+                    t: T::RightSquiggly,
+                    range: _
+                }] => Ok(Item::ExternBlock(Item::news(
+                    items,
+                    irange.to_owned())?,
+                    range.to_owned())
+                ),
+                _ => invalid!(range, N::ExternBlock, children)
+            }
             // I -> extern I
             [Node::Tm {
                 t: T::Extern,
