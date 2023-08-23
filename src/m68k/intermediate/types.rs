@@ -87,7 +87,7 @@ impl IdExpr {
             IdExpr::SquareIndex(expr, _offset, range) => {
                 // TODO Handle struct member access here, too
                 let tt = expr.type_preference(fienv, env)?;
-                if let TypeType::Array(tt, _) = tt {
+                if let TypeType::Pointer(tt) | TypeType::Array(tt, _) = tt {
                     Ok(*tt)
                 } else {
                     u_err!(range, "Cannot index into non-array type. Struct member access has not been implemented yet.")
@@ -96,7 +96,7 @@ impl IdExpr {
             IdExpr::RoundIndex(expr, _, range) => {
                 warn!("Round indexing not yet implemented");
                 let tt = expr.type_preference(fienv, env)?;
-                if let TypeType::Array(tt, _) = tt {
+                if let TypeType::Pointer(tt) | TypeType::Array(tt, _) = tt {
                     Ok(*tt)
                 } else {
                     u_err!(range, "Cannot index into non-array type. Struct member access has not been implemented yet.")
@@ -113,7 +113,7 @@ impl IdExpr {
                         if let Some(GlobalVar { name: Field { tt, name: _}, data: _ }) = env.get_global_var(&name) {
                             return Ok(tt.clone());
                         }
-                        return u_err!(range, "Unknown id {}", name);
+                        u_err!(range, "Unknown id {}", name)
                     }
                     TypeType::Array(_, _) => u_err!(range, "Cannot dereference array"),
                     TypeType::Struct(name, _) => u_err!(range, "Cannot dereference struct {}", name),
@@ -126,7 +126,7 @@ impl IdExpr {
                 if let Some(GlobalVar { name: Field { tt, name: _}, data: _ }) = env.get_global_var(&name) {
                     return Ok(tt.clone());
                 }
-                return u_err!(range, "Unknown id {}", name);
+                u_err!(range, "Unknown id {}", name)
             }
         }
     }

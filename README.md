@@ -55,13 +55,14 @@ extern {
 
 ## Tested Features
 1. `printf` (and therefore `extern`)
-2. Local variables
-3. Pointers (referencing and dereferencing)
-4. Addition, Subtraction, Multiplication
-5. `if`, `while`, `unless`, `do while`
-6. Global variables
-7. Arrays
-8. Returning values from a function
+2. String literals
+3. Local variables
+4. Pointers (referencing and dereferencing)
+5. Addition, Subtraction, Multiplication
+6. `if`, `while`, `unless`, `do while`
+7. Global variables
+8. Arrays
+9. Returning values from a function
 
 ## Untested Features
 1. Division
@@ -77,7 +78,7 @@ extern {
 
 ## Just Because
 I added in a few things just because I thought they were interesting. 
-1. The reference operator: The reference operator is `@( )`. Pointer arithmetic is not implemented yet.
+1. The reference operator: The reference operator is `@( )`. Pointer arithmetic is not implemented yet. The dereference operator is `#` because otherwise assigning to the dereference of a pointer would be confused with multiplying this expression with the previous expression.
 2. The `cleanup` expression: The `cleanup` expression allows you to exit early from a function but to do some cleanup before you return. If you use it, it must be defined at the end of a function. If control reaches the cleanup block, cleanup will occur, but if you call `return` before that point, the cleanup is skipped.
 ```
 i32 function_that_can_fail(i32 index) {

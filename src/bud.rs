@@ -112,6 +112,8 @@ grammar::grammar!(
         Not,
         #[token("@")]
         Reference,
+        #[token("#")]
+        Hash,
 
 
         // Logos requires one token variant to handle errors,
@@ -254,7 +256,7 @@ grammar::grammar!(
         IdExpr      => IdGen, LeftRound, Exprs, RightRound;
         IdExpr      => IdGen, LeftRound, RightRound;
         IdExpr      => IdGen;
-        IdExpr      => Star, IdExpr;
+        IdExpr      => Hash, IdExpr;
         ParenExpr   => LeftRound, Expr, RightRound;
         UnaryExpr   => Unop, NonBinExpr;
         BinaryExpr  => BinaryExpr, Binop, NonBinExpr;
@@ -557,6 +559,7 @@ impl std::fmt::Display for BudTerminal {
                 BudTerminal::LessEq => "<=".to_string(),
                 BudTerminal::Not => "!".to_string(),
                 BudTerminal::Reference => "@".to_string(),
+                BudTerminal::Hash => "#".to_string(),
                 BudTerminal::Error => "ERROR".to_string(),
                 BudTerminal::EOF => "$".to_string(),
             }
@@ -1795,13 +1798,13 @@ impl IdExpr {
                 t: T::Id(id),
                 range: range1,
             }] => Ok(IdExpr::Id(id.to_owned(), range1.to_owned())),
-            [Node::Tm { t: T::Star, range: _ }, Node::NonTm {
+            [Node::Tm { t: T::Hash, range: _ }, Node::NonTm {
                 n: N::IdExpr,
                 children: ide,
                 range: range1,
             }] => Ok(IdExpr::Deref(Box::new(IdExpr::new(ide, range1.to_owned())?), range)),
             _ => {
-                c_err!(range, "Invalid node for {} {:?}", N::IdExpr, children)
+                invalid!(range, N::IdExpr, children)
             }
         }
     }
